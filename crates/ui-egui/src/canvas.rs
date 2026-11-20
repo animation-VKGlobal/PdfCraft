@@ -51,7 +51,12 @@ use area::{drawing_edge_pointer, glide_interrupted, page_scroll, presentation_cl
 use bars::in_size_hint_zone;
 use bars::{Notice, notices, page_size_hint, quick_bar};
 pub use cache::RasterMemory;
-pub(crate) use cache::{BASE_SIDE, TILE_THRESHOLD, texture_image, thumbnail_rows};
+#[cfg(test)]
+pub(crate) use cache::apply_output_preview_filter;
+pub(crate) use cache::{
+    BASE_SIDE, OP_ACTIVE, OP_COLOR_WARNINGS, OP_NO_BLACK, OP_NO_CYAN, OP_NO_MAGENTA, OP_NO_YELLOW, OP_TAC_LIMIT_MASK, OP_TAC_LIMIT_SHIFT,
+    OP_TAC_WARN, TILE_THRESHOLD, texture_image, thumbnail_rows,
+};
 #[cfg(test)]
 use cache::{
     GRAYSCALE_TAG, GRID_TAG, MAX_CACHED_TEXT_PAGES, MAX_THUMB_DEMAND, PAGE_BYTES, THUMB_BYTES, THUMB_H, THUMB_TAG, THUMB_W, TILE, grayscale,
@@ -1441,6 +1446,7 @@ struct PageEnv<'a> {
     today: (i64, u32, u32),
     can_paste_image: bool,
     output_preview_boxes: bool,
+    op_tag: u64,
 }
 
 /// What the page-scroll closure produces for the rest of the frame.
@@ -1473,6 +1479,7 @@ struct PageOut {
     /// page of a zoomed spread) has no screen transform, but still decides where the row ends.
     row_on_screen: Option<Rect>,
     stamp_placed: bool,
+    pointer: Option<Pos2>,
 }
 
 /// The page-scroll closure's body: lays out and draws the visible pages, their tools and overlays, and
@@ -1624,7 +1631,7 @@ fn paint_page_surface(ui: &mut egui::Ui, view: &mut DocView, frame: &mut PageFra
         // Whole-page raster: sharp when small, a low-res backdrop when tiled.
         let (want_scale, want_tag) = if tiled {
             let bs = BASE_SIDE.min(max_side) / pw_pt.max(ph_pt);
-            (bs, scale_tag(bs))
+            (bs, scale_tag(bs) | frame.env.op_tag)
         } else {
             (scale, tag)
         };
@@ -2291,6 +2298,7 @@ fn draw_pages(
         refused,
         row_on_screen,
         stamp_placed,
+        pointer,
     };
     (wanted, visible_now)
 }
@@ -2498,7 +2506,7 @@ fn prefetch_demand(view: &DocView, p: &pdfcraft_render::PageInfo, i: usize, scal
     let bs = BASE_SIDE.min(max_side) / side;
     match view.pages.get(&i).filter(|c| c.tag != STALE_TAG && tag_scale(c.tag) >= bs) {
         Some(c) => (i, tag_scale(c.tag), c.tag, None),
-        None => (i, bs, scale_tag(bs), None),
+        None => (i, bs, scale_tag(bs) | (tag & !0xFFFF_FFFF), None),
     }
 }
 
@@ -3315,6 +3323,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     let keys = app.page_keys;
     let organize_zoom = app.organize_zoom;
     let invert_middle = app.invert_middle_drag;
+    let (op_tag, op_paper) = output_preview_settings(app);
     let view = &mut app.views[index];
     if view.organize {
         // One remembered grid size for every document, kept in the settings.
@@ -3380,7 +3389,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     );
     let ppp = ui.ctx().pixels_per_point();
     let scale = view.render_scale(ppp);
-    let tag = scale_tag(scale);
+    let tag = scale_tag(scale) | op_tag;
     // Hold sharp re-renders while the zoom is still moving: a new scale every frame would
     // cancel the in-flight full-page interpret and restart it, so on a heavy page (a CAD
     // plot with ~1000 images renders for seconds) the sharp raster never arrives and the
@@ -3477,7 +3486,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         middle_gesture,
         modal,
         navigation_enabled,
-        paper,
+        paper: op_paper.unwrap_or(paper),
         show_page_edge_shadows: app.show_page_edge_shadows,
         ppp,
         precise_scroll,
@@ -3511,6 +3520,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         today,
         can_paste_image,
         output_preview_boxes: matches!(app.dialog, Some(crate::Dialog::OutputPreview)) && app.output_preview_draft.show_boxes,
+        op_tag,
     };
     let mut page_out = PageOut::default();
     // Keyed by the view, not the document: with one document in both panes of split view, shared
@@ -3541,6 +3551,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         mut refused,
         row_on_screen,
         stamp_placed,
+        pointer,
     } = page_out;
     view.single_edges = visible_pages.first().copied().filter(|_| !view.continuous).map(|page| {
         // At the top once the page's top edge shows where going to a page puts it (a gap
@@ -3659,6 +3670,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         form,
         generation,
         avail,
+        pointer,
     };
     apply_frame_requests(app, index, ui, requests);
 }
@@ -3688,6 +3700,7 @@ struct FrameRequests {
     form: Arc<Vec<pdfcraft_engine::FormField>>,
     generation: u64,
     avail: Rect,
+    pointer: Option<Pos2>,
 }
 
 /// Opens the dialogs and runs the app commands the frame asked for.
@@ -3714,6 +3727,7 @@ fn apply_frame_requests(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui, 
         form,
         generation,
         avail,
+        pointer,
     } = requests;
     if let Some((page, at)) = app.views[index].comments.attach_at.take() {
         app.attach_file_comment(page, at);
@@ -3949,8 +3963,30 @@ fn apply_frame_requests(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui, 
     if let Some((source, file, destination)) = remote_open {
         app.open_remote_link(source, file, destination);
     }
+    update_output_preview_hover(app, index, pointer);
+}
+
+fn output_preview_settings(app: &PdfCraftApp) -> (u64, Option<Color32>) {
+    if matches!(app.dialog, Some(crate::Dialog::OutputPreview)) {
+        let tag = app.output_preview_draft.filter_tag();
+        let paper = if app.output_preview_draft.simulate_paper_color || app.output_preview_draft.set_page_bg_color {
+            Some(Color32::from_rgb(
+                app.output_preview_draft.page_bg_color[0],
+                app.output_preview_draft.page_bg_color[1],
+                app.output_preview_draft.page_bg_color[2],
+            ))
+        } else {
+            None
+        };
+        (tag, paper)
+    } else {
+        (0, None)
+    }
+}
+
+fn update_output_preview_hover(app: &mut PdfCraftApp, index: usize, hover: Option<Pos2>) {
     if matches!(app.dialog, Some(crate::Dialog::OutputPreview))
-        && let Some(hover) = ui.input(|i| i.pointer.hover_pos())
+        && let Some(hover) = hover
         && let Some((page, page_rect)) = app.views[index].screen_rects.iter().find(|(_, r)| r.contains(hover)).copied()
     {
         let needs_sample = match app.output_preview_draft.last_sample_pos {

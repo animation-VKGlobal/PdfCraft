@@ -77,17 +77,47 @@ impl OutputPreviewDraft {
         let gf = g as f32 / 255.0;
         let bf = b as f32 / 255.0;
         let k = (1.0 - rf.max(gf).max(bf)).clamp(0.0, 1.0);
-        if k >= 0.999 {
-            self.sample_cyan = 0.0;
-            self.sample_magenta = 0.0;
-            self.sample_yellow = 0.0;
-            self.sample_black = 100.0;
-        } else {
-            self.sample_cyan = (((1.0 - rf - k) / (1.0 - k)).clamp(0.0, 1.0) * 100.0).round();
-            self.sample_magenta = (((1.0 - gf - k) / (1.0 - k)).clamp(0.0, 1.0) * 100.0).round();
-            self.sample_yellow = (((1.0 - bf - k) / (1.0 - k)).clamp(0.0, 1.0) * 100.0).round();
-            self.sample_black = (k * 100.0).round();
+        let ucr = (1.0 - k * 0.4).clamp(0.0, 1.0);
+        self.sample_cyan = (((1.0 - rf) * ucr).clamp(0.0, 1.0) * 100.0).round();
+        self.sample_magenta = (((1.0 - gf) * ucr).clamp(0.0, 1.0) * 100.0).round();
+        self.sample_yellow = (((1.0 - bf) * ucr).clamp(0.0, 1.0) * 100.0).round();
+        self.sample_black = (k * 100.0).round();
+    }
+
+    /// Request tag bits encoding the active plate isolation and TAC warning configuration.
+    pub fn filter_tag(&self) -> u64 {
+        let is_color_warn = self.preview_mode == "Color Warnings";
+        let is_separations = self.preview_mode == "Separations";
+        let plates_filtered = is_separations && (!self.plate_cyan || !self.plate_magenta || !self.plate_yellow || !self.plate_black);
+
+        if !plates_filtered && !self.total_area_coverage_warn && !is_color_warn {
+            return 0;
         }
+
+        let mut tag = crate::canvas::OP_ACTIVE;
+        if is_separations {
+            if !self.plate_cyan {
+                tag |= crate::canvas::OP_NO_CYAN;
+            }
+            if !self.plate_magenta {
+                tag |= crate::canvas::OP_NO_MAGENTA;
+            }
+            if !self.plate_yellow {
+                tag |= crate::canvas::OP_NO_YELLOW;
+            }
+            if !self.plate_black {
+                tag |= crate::canvas::OP_NO_BLACK;
+            }
+        }
+        if self.total_area_coverage_warn {
+            tag |= crate::canvas::OP_TAC_WARN;
+            let limit = (u64::from(self.total_area_coverage_limit) & crate::canvas::OP_TAC_LIMIT_MASK) << crate::canvas::OP_TAC_LIMIT_SHIFT;
+            tag |= limit;
+        }
+        if is_color_warn {
+            tag |= crate::canvas::OP_COLOR_WARNINGS;
+        }
+        tag
     }
 }
 
@@ -103,6 +133,9 @@ pub fn show(app: &mut PdfCraftApp, ctx: &egui::Context) {
     let t = Tokens::get(ctx);
 
     let mut open_page_boxes = false;
+    let initial_tag = app.output_preview_draft.filter_tag();
+    let initial_paper_color =
+        (app.output_preview_draft.simulate_paper_color, app.output_preview_draft.set_page_bg_color, app.output_preview_draft.page_bg_color);
 
     egui::Window::new(tl!("Output Preview"))
         .id(egui::Id::unique("output_preview_window"))
@@ -310,12 +343,25 @@ pub fn show(app: &mut PdfCraftApp, ctx: &egui::Context) {
             });
         });
 
+    let tag_changed = app.output_preview_draft.filter_tag() != initial_tag;
+    let paper_changed =
+        (app.output_preview_draft.simulate_paper_color, app.output_preview_draft.set_page_bg_color, app.output_preview_draft.page_bg_color)
+            != initial_paper_color;
+
+    if tag_changed || paper_changed {
+        app.invalidate_output_preview();
+    }
+
     if open_page_boxes {
         app.boxes_draft.range = crate::dialogs::pageboxes::Range::Current;
         app.boxes_draft.seeded = None;
         app.dialog = Some(Dialog::PageBoxes);
     } else if !is_open {
+        let had_filter = app.output_preview_draft.filter_tag() != 0;
         app.dialog = None;
+        if had_filter {
+            app.invalidate_output_preview();
+        }
     }
 }
 
@@ -368,6 +414,13 @@ pub(crate) fn paint_output_preview_boxes(
 }
 
 impl PdfCraftApp {
+    /// Invalidate view content so rasters update with Output Preview separation/TAC filters.
+    pub(crate) fn invalidate_output_preview(&mut self) {
+        for v in &mut self.views {
+            v.invalidate_content();
+        }
+    }
+
     /// Sample the color under the cursor for Output Preview live CMYK readout.
     pub(crate) fn sample_output_preview_color(&mut self, index: usize, page: usize, pos: egui::Pos2, _page_rect: egui::Rect) {
         let Some(view) = self.views.get(index) else { return };
@@ -463,9 +516,12 @@ mod tests {
         assert_eq!(d.sample_yellow, 0.0);
         assert_eq!(d.sample_black, 0.0);
 
-        // Pure Black (0, 0, 0) -> CMYK 0, 0, 0, 100
+        // Pure Black (0, 0, 0) -> CMYK 60, 60, 60, 100 (standard rich black, TAC 280%)
         d.update_sample_rgb(0, 0, 0);
         assert_eq!(d.sample_black, 100.0);
+        assert_eq!(d.sample_cyan, 60.0);
+        assert_eq!(d.sample_magenta, 60.0);
+        assert_eq!(d.sample_yellow, 60.0);
 
         // Pure Cyan (0, 255, 255) -> Cyan 100%, M 0%, Y 0%, K 0%
         d.update_sample_rgb(0, 255, 255);
@@ -503,14 +559,55 @@ mod tests {
 
         // 50% Gray (128, 128, 128)
         d.update_sample_rgb(128, 128, 128);
-        assert_eq!(d.sample_cyan, 0.0);
-        assert_eq!(d.sample_magenta, 0.0);
-        assert_eq!(d.sample_yellow, 0.0);
+        assert_eq!(d.sample_cyan, 40.0);
+        assert_eq!(d.sample_magenta, 40.0);
+        assert_eq!(d.sample_yellow, 40.0);
         assert_eq!(d.sample_black, 50.0);
 
         // Dark blend
         d.update_sample_rgb(30, 40, 50);
         assert!(d.sample_black >= 80.0);
         assert!(d.sample_cyan + d.sample_magenta + d.sample_yellow + d.sample_black > 80.0);
+    }
+
+    #[test]
+    fn filter_tag_and_plate_isolation() {
+        let mut d = OutputPreviewDraft::default();
+        // Default state: all plates active, TAC off -> filter_tag is 0
+        assert_eq!(d.filter_tag(), 0);
+
+        // Turn off Cyan
+        d.plate_cyan = false;
+        let tag_no_cyan = d.filter_tag();
+        assert_ne!(tag_no_cyan, 0);
+        assert_ne!(tag_no_cyan & crate::canvas::OP_ACTIVE, 0);
+        assert_ne!(tag_no_cyan & crate::canvas::OP_NO_CYAN, 0);
+
+        // Turn on TAC warning
+        d.plate_cyan = true;
+        d.total_area_coverage_warn = true;
+        d.total_area_coverage_limit = 250;
+        let tag_tac = d.filter_tag();
+        assert_ne!(tag_tac, 0);
+        assert_ne!(tag_tac & crate::canvas::OP_TAC_WARN, 0);
+        let extracted_limit = (tag_tac >> crate::canvas::OP_TAC_LIMIT_SHIFT) & crate::canvas::OP_TAC_LIMIT_MASK;
+        assert_eq!(extracted_limit, 250);
+
+        // Test apply_output_preview_filter on image pixels
+        let mut img = egui::ColorImage::new(
+            [2, 1],
+            vec![Color32::from_rgba_premultiplied(0, 255, 255, 255), Color32::from_rgba_premultiplied(10, 10, 10, 255)],
+        );
+
+        // Filter with Cyan turned off
+        crate::canvas::apply_output_preview_filter(&mut img, tag_no_cyan);
+        // The first pixel was pure cyan: without cyan ink it becomes white (255, 255, 255)
+        assert_eq!(img.pixels[0], Color32::from_rgba_premultiplied(255, 255, 255, 255));
+
+        // Filter with TAC warning on high-density second pixel
+        let mut img_tac = egui::ColorImage::new([1, 1], vec![Color32::from_rgba_premultiplied(10, 10, 10, 255)]);
+        crate::canvas::apply_output_preview_filter(&mut img_tac, tag_tac);
+        // Exceeds 250% coverage -> neon green warning (0, 255, 0)
+        assert_eq!(img_tac.pixels[0], Color32::from_rgba_premultiplied(0, 255, 0, 255));
     }
 }

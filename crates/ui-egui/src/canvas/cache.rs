@@ -17,6 +17,17 @@ pub(super) const GRID_TAG: u64 = 1 << 61;
 /// turn colour previews into monochrome ones too.
 pub(super) const GRAYSCALE_TAG: u64 = 1 << 59;
 
+/// Output Preview active filter tag bit: isolating CMYK plates and TAC warnings.
+pub(crate) const OP_ACTIVE: u64 = 1 << 58;
+pub(crate) const OP_NO_BLACK: u64 = 1 << 57;
+pub(crate) const OP_NO_YELLOW: u64 = 1 << 56;
+pub(crate) const OP_NO_MAGENTA: u64 = 1 << 55;
+pub(crate) const OP_NO_CYAN: u64 = 1 << 54;
+pub(crate) const OP_TAC_WARN: u64 = 1 << 53;
+pub(crate) const OP_COLOR_WARNINGS: u64 = 1 << 52;
+pub(crate) const OP_TAC_LIMIT_MASK: u64 = 0x3FF;
+pub(crate) const OP_TAC_LIMIT_SHIFT: u32 = 42;
+
 /// The tag of a raster that is out of date (shown until its replacement arrives).
 pub(super) const STALE_TAG: u64 = u64::MAX;
 
@@ -721,7 +732,10 @@ impl DocView {
             return 0;
         }
         // The length was checked above, so the renderer's buffer becomes the texture data as is.
-        let img = texture_image([r.width as usize, r.height as usize], r.rgba);
+        let mut img = texture_image([r.width as usize, r.height as usize], r.rgba);
+        if r.request.tag & OP_ACTIVE != 0 {
+            apply_output_preview_filter(&mut img, r.request.tag);
+        }
         if let Some(t) = r.request.tile {
             let key = (page, r.request.tag, t.x, t.y);
             let tex = ctx.load_texture(format!("tile-{:?}-{page}-{}-{}", self.id, t.x, t.y), img, TextureOptions::LINEAR);
@@ -897,7 +911,8 @@ pub(super) fn scale_tag(scale: f32) -> u64 {
 
 /// The scale of a raster tagged by [`scale_tag`].
 pub(super) fn tag_scale(tag: u64) -> f32 {
-    (tag as f64 / 65536.0) as f32
+    let clean = tag & 0xFFFF_FFFF;
+    (clean as f64 / 65536.0) as f32
 }
 
 /// Device-pixel side of a page tile at `scale` for a page `page_max_px` device pixels on
@@ -952,4 +967,76 @@ pub(super) fn grayscale(mut img: egui::ColorImage) -> egui::ColorImage {
         *c = Color32::from_rgba_premultiplied(gray, gray, gray, a);
     }
     img
+}
+
+/// Apply Output Preview plate isolation (CMYK plate filter) and Total Area Coverage warning highlights.
+pub(crate) fn apply_output_preview_filter(img: &mut egui::ColorImage, tag: u64) {
+    if tag & OP_ACTIVE == 0 {
+        return;
+    }
+    let no_c = tag & OP_NO_CYAN != 0;
+    let no_m = tag & OP_NO_MAGENTA != 0;
+    let no_y = tag & OP_NO_YELLOW != 0;
+    let no_k = tag & OP_NO_BLACK != 0;
+    let tac_warn = tag & OP_TAC_WARN != 0;
+    let color_warn = tag & OP_COLOR_WARNINGS != 0;
+    let tac_limit = ((tag >> OP_TAC_LIMIT_SHIFT) & OP_TAC_LIMIT_MASK) as f32;
+
+    for chunk in &mut img.pixels {
+        let a = chunk.a();
+        if a == 0 {
+            continue;
+        }
+        let af = f32::from(a) / 255.0;
+        let rf = (f32::from(chunk.r()) / af / 255.0).clamp(0.0, 1.0);
+        let gf = (f32::from(chunk.g()) / af / 255.0).clamp(0.0, 1.0);
+        let bf = (f32::from(chunk.b()) / af / 255.0).clamp(0.0, 1.0);
+
+        let k = (1.0 - rf.max(gf).max(bf)).clamp(0.0, 1.0);
+        let ucr = (1.0 - k * 0.4).clamp(0.0, 1.0);
+        let mut c = ((1.0 - rf) * ucr).clamp(0.0, 1.0);
+        let mut m = ((1.0 - gf) * ucr).clamp(0.0, 1.0);
+        let mut y = ((1.0 - bf) * ucr).clamp(0.0, 1.0);
+        let mut eff_k = k;
+
+        // TAC Warning check: highlight exceeding pixels in neon green (Acrobat default)
+        if tac_warn {
+            let total_coverage = (c + m + y + eff_k) * 100.0;
+            if total_coverage > tac_limit {
+                *chunk = Color32::from_rgba_premultiplied(0, a, 0, a);
+                continue;
+            }
+        }
+
+        // Color warnings (out of gamut / excessive ink coverage)
+        if color_warn {
+            let total_coverage = (c + m + y + eff_k) * 100.0;
+            if total_coverage > 320.0 {
+                *chunk = Color32::from_rgba_premultiplied(0, a, 0, a);
+                continue;
+            }
+        }
+
+        if no_c {
+            c = 0.0;
+        }
+        if no_m {
+            m = 0.0;
+        }
+        if no_y {
+            y = 0.0;
+        }
+        if no_k {
+            eff_k = 0.0;
+        }
+
+        let new_rf = ((1.0 - c) * (1.0 - eff_k)).clamp(0.0, 1.0);
+        let new_gf = ((1.0 - m) * (1.0 - eff_k)).clamp(0.0, 1.0);
+        let new_bf = ((1.0 - y) * (1.0 - eff_k)).clamp(0.0, 1.0);
+
+        let pr = (new_rf * af * 255.0).round().clamp(0.0, 255.0) as u8;
+        let pg = (new_gf * af * 255.0).round().clamp(0.0, 255.0) as u8;
+        let pb = (new_bf * af * 255.0).round().clamp(0.0, 255.0) as u8;
+        *chunk = Color32::from_rgba_premultiplied(pr, pg, pb, a);
+    }
 }
