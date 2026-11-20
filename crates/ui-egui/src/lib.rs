@@ -124,6 +124,7 @@ use dialogs::convert_colours_ui;
 use dialogs::credits;
 use dialogs::hairlines_ui;
 use dialogs::marks_ui;
+pub use dialogs::output_preview_ui;
 use dialogs::pageboxes;
 use dialogs::palette;
 use dialogs::printer_marks_ui;
@@ -807,6 +808,7 @@ pub struct PdfCraftApp {
     pub printer_marks_draft: printer_marks_ui::PrinterMarksDraft,
     pub convert_colours_draft: convert_colours_ui::ConvertColoursDraft,
     pub hairlines_draft: hairlines_ui::HairlinesDraft,
+    pub output_preview_draft: output_preview_ui::OutputPreviewDraft,
     /// Protect Using Password dialog state.
     pub protect_draft: protect::ProtectDraft,
     /// New bookmarks from text styles dialog state (#1693).

@@ -1,0 +1,375 @@
+//! Print production ▸ Output preview (Acrobat's Output Preview inspector).
+//!
+//! Simulation profile, overprint preview, color separations (CMYK & spot plates),
+//! live coverage sampling at the pointer, and total area coverage warnings.
+
+use egui::{Align, Color32, CornerRadius, Layout, Sense, Stroke, vec2};
+
+use crate::theme::{self, Tokens};
+use crate::{Dialog, PdfCraftApp, widgets};
+
+/// Settings and live inspection values of the Output Preview inspector.
+#[derive(Clone, Debug, PartialEq)]
+pub struct OutputPreviewDraft {
+    pub simulation_profile: String,
+    pub simulate_overprinting: bool,
+    pub simulate_paper_color: bool,
+    pub simulate_black_ink: bool,
+    pub set_page_bg_color: bool,
+    pub page_bg_color: [u8; 3],
+    pub show_filter: String,
+    pub warning_opacity: u32,
+    pub show_boxes: bool,
+    pub preview_mode: String,
+    pub process_plates: bool,
+    pub plate_cyan: bool,
+    pub plate_magenta: bool,
+    pub plate_yellow: bool,
+    pub plate_black: bool,
+    pub sample_cyan: f32,
+    pub sample_magenta: f32,
+    pub sample_yellow: f32,
+    pub sample_black: f32,
+    pub sample_size: String,
+    pub total_area_coverage_warn: bool,
+    pub total_area_coverage_limit: u32,
+    pub page_has_transparency: bool,
+    pub transparency_blending_space: String,
+}
+
+impl Default for OutputPreviewDraft {
+    fn default() -> Self {
+        Self {
+            simulation_profile: "U.S. Web Coated (SWOP) v2".into(),
+            simulate_overprinting: true,
+            simulate_paper_color: false,
+            simulate_black_ink: false,
+            set_page_bg_color: false,
+            page_bg_color: [255, 255, 255],
+            show_filter: "All".into(),
+            warning_opacity: 100,
+            show_boxes: false,
+            preview_mode: "Separations".into(),
+            process_plates: true,
+            plate_cyan: true,
+            plate_magenta: true,
+            plate_yellow: true,
+            plate_black: true,
+            sample_cyan: 0.0,
+            sample_magenta: 0.0,
+            sample_yellow: 0.0,
+            sample_black: 0.0,
+            sample_size: "Point Sample".into(),
+            total_area_coverage_warn: false,
+            total_area_coverage_limit: 280,
+            page_has_transparency: false,
+            transparency_blending_space: "DeviceCMYK".into(),
+        }
+    }
+}
+
+impl OutputPreviewDraft {
+    /// Update sampled CMYK values from standard RGB (0-255).
+    pub fn update_sample_rgb(&mut self, r: u8, g: u8, b: u8) {
+        let rf = r as f32 / 255.0;
+        let gf = g as f32 / 255.0;
+        let bf = b as f32 / 255.0;
+        let k = (1.0 - rf.max(gf).max(bf)).clamp(0.0, 1.0);
+        if k >= 0.999 {
+            self.sample_cyan = 0.0;
+            self.sample_magenta = 0.0;
+            self.sample_yellow = 0.0;
+            self.sample_black = 100.0;
+        } else {
+            self.sample_cyan = (((1.0 - rf - k) / (1.0 - k)).clamp(0.0, 1.0) * 100.0).round();
+            self.sample_magenta = (((1.0 - gf - k) / (1.0 - k)).clamp(0.0, 1.0) * 100.0).round();
+            self.sample_yellow = (((1.0 - bf - k) / (1.0 - k)).clamp(0.0, 1.0) * 100.0).round();
+            self.sample_black = (k * 100.0).round();
+        }
+    }
+}
+
+fn color_swatch(ui: &mut egui::Ui, color: Color32) {
+    let (rect, _) = ui.allocate_exact_size(vec2(13.0, 13.0), Sense::hover());
+    ui.painter().rect_filled(rect, CornerRadius::same(2), color);
+    ui.painter().rect_stroke(rect, CornerRadius::same(2), Stroke::new(1.0, Color32::from_gray(120)), egui::StrokeKind::Outside);
+}
+
+/// Draw the floating Output Preview inspector window.
+pub fn show(app: &mut PdfCraftApp, ctx: &egui::Context) {
+    let mut is_open = true;
+    let t = Tokens::get(ctx);
+
+    let mut open_page_boxes = false;
+
+    egui::Window::new(tl!("Output Preview"))
+        .id(egui::Id::unique("output_preview_window"))
+        .open(&mut is_open)
+        .collapsible(false)
+        .resizable(true)
+        .order(egui::Order::Foreground)
+        .min_width(380.0)
+        .default_width(420.0)
+        .default_pos(egui::pos2(120.0, 80.0))
+        .show(ctx, |ui| {
+            widgets::begin_dialog(ui);
+            egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+                let d = &mut app.output_preview_draft;
+
+                // ---- Simulate section --------------------------------------------------------
+                widgets::section_title(ui, tl!("Simulate"));
+                ui.horizontal(|ui| {
+                    ui.label(tl!("Simulation Profile:"));
+                    craft_ui::ComboBox::from_id_salt("op_sim_profile").selected_text(&d.simulation_profile).show_ui(ui, |ui| {
+                        for profile in [
+                            "U.S. Web Coated (SWOP) v2",
+                            "Coated FOGRA39 (ISO 12647-2:2004)",
+                            "GRACoL 2006 (ISO 12647-2:2004)",
+                            "Euroscale Uncoated v2",
+                            "Japan Color 2001 Coated",
+                            "sRGB IEC61966-2.1",
+                            "Apple RGB",
+                            "Adobe RGB (1998)",
+                        ] {
+                            ui.selectable_value(&mut d.simulation_profile, profile.into(), profile);
+                        }
+                    });
+                });
+                ui.add_space(3.0);
+
+                ui.horizontal(|ui| {
+                    ui.add(widgets::checkbox(&mut d.simulate_overprinting, tl!("Simulate Overprinting")));
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        let has_op = if d.simulate_overprinting { tl!("Yes") } else { tl!("No") };
+                        ui.label(
+                            egui::RichText::new(format!("{}: {has_op}", tl!("Page has Overprint"))).color(t.text_muted).font(theme::regular(12.0)),
+                        );
+                    });
+                });
+                ui.add_space(3.0);
+
+                ui.horizontal(|ui| {
+                    ui.add(widgets::checkbox(&mut d.simulate_paper_color, tl!("Simulate Paper Color")));
+                    ui.add(widgets::checkbox(&mut d.set_page_bg_color, tl!("Set Page Background Color")));
+                    color_swatch(ui, Color32::from_rgb(d.page_bg_color[0], d.page_bg_color[1], d.page_bg_color[2]));
+                });
+                ui.add_space(3.0);
+
+                ui.horizontal(|ui| {
+                    ui.add(widgets::checkbox(&mut d.simulate_black_ink, tl!("Simulate Black Ink")));
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        let _ = ui.button(tl!("Ink Manager…"));
+                    });
+                });
+                ui.add_space(8.0);
+                ui.separator();
+
+                // ---- Show section ------------------------------------------------------------
+                widgets::section_title(ui, tl!("Show"));
+                ui.horizontal(|ui| {
+                    ui.label(tl!("Show:"));
+                    craft_ui::ComboBox::from_id_salt("op_show_filter").selected_text(&d.show_filter).show_ui(ui, |ui| {
+                        for f in ["All", "DeviceCMYK", "DeviceRGB", "DeviceGray", "Images", "Text", "Line Art"] {
+                            ui.selectable_value(&mut d.show_filter, f.into(), f);
+                        }
+                    });
+                    ui.add_space(8.0);
+                    ui.label(tl!("Warning Opacity:"));
+                    ui.add(egui::DragValue::new(&mut d.warning_opacity).range(0..=100).suffix("%"));
+                });
+                ui.add_space(3.0);
+
+                ui.horizontal(|ui| {
+                    ui.add(widgets::checkbox(&mut d.show_boxes, tl!("Show art, trim, & bleed boxes")));
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        if ui.button(tl!("Set Page Boxes")).clicked() {
+                            open_page_boxes = true;
+                        }
+                    });
+                });
+                ui.add_space(8.0);
+                ui.separator();
+
+                // ---- Preview dropdown -------------------------------------------------------
+                ui.horizontal(|ui| {
+                    ui.label(tl!("Preview:"));
+                    craft_ui::ComboBox::from_id_salt("op_preview_mode").selected_text(&d.preview_mode).show_ui(ui, |ui| {
+                        for mode in ["Separations", "Color Warnings", "Object Inspector"] {
+                            ui.selectable_value(&mut d.preview_mode, mode.into(), mode);
+                        }
+                    });
+                });
+                ui.add_space(6.0);
+
+                // ---- Separations Table -------------------------------------------------------
+                ui.label(egui::RichText::new(tl!("Separations")).font(theme::semibold(13.0)));
+                egui::Frame::NONE
+                    .fill(t.field)
+                    .stroke(Stroke::new(1.0, t.border))
+                    .corner_radius(CornerRadius::same(4))
+                    .inner_margin(egui::Margin::same(8))
+                    .show(ui, |ui| {
+                        ui.set_width(ui.available_width());
+
+                        // Process Plates master row
+                        let mut proc = d.process_plates;
+                        if ui.add(widgets::checkbox(&mut proc, tl!("Process Plates"))).changed() {
+                            d.process_plates = proc;
+                            d.plate_cyan = proc;
+                            d.plate_magenta = proc;
+                            d.plate_yellow = proc;
+                            d.plate_black = proc;
+                        }
+                        ui.add_space(2.0);
+
+                        // Cyan
+                        ui.horizontal(|ui| {
+                            ui.add(widgets::checkbox_without_text(&mut d.plate_cyan));
+                            color_swatch(ui, Color32::from_rgb(0, 174, 239));
+                            ui.label(tl!("Process Cyan"));
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                ui.label(format!("{:.0}%", d.sample_cyan));
+                            });
+                        });
+                        ui.add_space(2.0);
+
+                        // Magenta
+                        ui.horizontal(|ui| {
+                            ui.add(widgets::checkbox_without_text(&mut d.plate_magenta));
+                            color_swatch(ui, Color32::from_rgb(236, 0, 140));
+                            ui.label(tl!("Process Magenta"));
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                ui.label(format!("{:.0}%", d.sample_magenta));
+                            });
+                        });
+                        ui.add_space(2.0);
+
+                        // Yellow
+                        ui.horizontal(|ui| {
+                            ui.add(widgets::checkbox_without_text(&mut d.plate_yellow));
+                            color_swatch(ui, Color32::from_rgb(255, 242, 0));
+                            ui.label(tl!("Process Yellow"));
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                ui.label(format!("{:.0}%", d.sample_yellow));
+                            });
+                        });
+                        ui.add_space(2.0);
+
+                        // Black
+                        ui.horizontal(|ui| {
+                            ui.add(widgets::checkbox_without_text(&mut d.plate_black));
+                            color_swatch(ui, Color32::from_rgb(0, 0, 0));
+                            ui.label(tl!("Process Black"));
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                ui.label(format!("{:.0}%", d.sample_black));
+                            });
+                        });
+                        ui.add_space(4.0);
+
+                        // Total Area Coverage sum
+                        let total = d.sample_cyan + d.sample_magenta + d.sample_yellow + d.sample_black;
+                        ui.horizontal(|ui| {
+                            ui.add_space(32.0);
+                            ui.label(egui::RichText::new(tl!("Total Area Coverage")).font(theme::semibold(12.0)));
+                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                                ui.label(egui::RichText::new(format!("{total:.0}%")).font(theme::semibold(12.0)));
+                            });
+                        });
+                    });
+                ui.add_space(8.0);
+
+                // ---- Sample Size & TAC limit -------------------------------------------------
+                ui.horizontal(|ui| {
+                    ui.label(tl!("Sample Size:"));
+                    craft_ui::ComboBox::from_id_salt("op_sample_size").selected_text(&d.sample_size).show_ui(ui, |ui| {
+                        for s in ["Point Sample", "3 by 3 Average", "5 by 5 Average"] {
+                            ui.selectable_value(&mut d.sample_size, s.into(), s);
+                        }
+                    });
+                });
+                ui.add_space(4.0);
+
+                ui.horizontal(|ui| {
+                    ui.add(widgets::checkbox(&mut d.total_area_coverage_warn, tl!("Total Area Coverage")));
+                    color_swatch(ui, Color32::from_rgb(0, 255, 0));
+                    ui.add(egui::DragValue::new(&mut d.total_area_coverage_limit).range(100..=400).suffix("%"));
+                });
+                ui.add_space(6.0);
+
+                let has_trans = if d.page_has_transparency { tl!("Yes") } else { tl!("No") };
+                ui.label(
+                    egui::RichText::new(format!("{}: {has_trans}", tl!("Page has Transparency"))).color(t.text_muted).font(theme::regular(12.0)),
+                );
+                ui.label(
+                    egui::RichText::new(format!("{}: {}", tl!("Transparency Blending Color Space"), d.transparency_blending_space))
+                        .color(t.text_muted)
+                        .font(theme::regular(12.0)),
+                );
+            });
+        });
+
+    if open_page_boxes {
+        app.dialog = Some(Dialog::PageBoxes);
+    } else if !is_open {
+        app.dialog = None;
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn output_preview_default_state() {
+        let d = OutputPreviewDraft::default();
+        assert_eq!(d.simulation_profile, "U.S. Web Coated (SWOP) v2");
+        assert!(d.simulate_overprinting);
+        assert!(!d.simulate_paper_color);
+        assert!(!d.simulate_black_ink);
+        assert_eq!(d.show_filter, "All");
+        assert_eq!(d.preview_mode, "Separations");
+        assert!(d.process_plates);
+        assert!(d.plate_cyan);
+        assert!(d.plate_magenta);
+        assert!(d.plate_yellow);
+        assert!(d.plate_black);
+        assert_eq!(d.sample_size, "Point Sample");
+        assert_eq!(d.total_area_coverage_limit, 280);
+    }
+
+    #[test]
+    fn cmyk_rgb_conversion_sampling() {
+        let mut d = OutputPreviewDraft::default();
+        // Pure White (255, 255, 255) -> CMYK 0, 0, 0, 0
+        d.update_sample_rgb(255, 255, 255);
+        assert_eq!(d.sample_cyan, 0.0);
+        assert_eq!(d.sample_magenta, 0.0);
+        assert_eq!(d.sample_yellow, 0.0);
+        assert_eq!(d.sample_black, 0.0);
+
+        // Pure Black (0, 0, 0) -> CMYK 0, 0, 0, 100
+        d.update_sample_rgb(0, 0, 0);
+        assert_eq!(d.sample_black, 100.0);
+
+        // Pure Cyan (0, 255, 255) -> Cyan 100%, M 0%, Y 0%, K 0%
+        d.update_sample_rgb(0, 255, 255);
+        assert_eq!(d.sample_cyan, 100.0);
+        assert_eq!(d.sample_magenta, 0.0);
+        assert_eq!(d.sample_yellow, 0.0);
+        assert_eq!(d.sample_black, 0.0);
+
+        // Pure Magenta (255, 0, 255) -> Cyan 0%, M 100%, Y 0%, K 0%
+        d.update_sample_rgb(255, 0, 255);
+        assert_eq!(d.sample_cyan, 0.0);
+        assert_eq!(d.sample_magenta, 100.0);
+        assert_eq!(d.sample_yellow, 0.0);
+        assert_eq!(d.sample_black, 0.0);
+
+        // Pure Yellow (255, 255, 0) -> Cyan 0%, M 0%, Y 100%, K 0%
+        d.update_sample_rgb(255, 255, 0);
+        assert_eq!(d.sample_cyan, 0.0);
+        assert_eq!(d.sample_magenta, 0.0);
+        assert_eq!(d.sample_yellow, 100.0);
+        assert_eq!(d.sample_black, 0.0);
+    }
+}

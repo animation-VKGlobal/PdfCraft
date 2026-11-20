@@ -224,6 +224,7 @@ impl PdfCraftApp {
             }
             "prepress.convert_colors" => self.dialog = Some(Dialog::ConvertColours),
             "prepress.hairlines" => self.dialog = Some(Dialog::FixHairlines),
+            "prepress.output_preview" => self.dialog = Some(Dialog::OutputPreview),
             "protect.remove" => {
                 if self.apply_edit(Edit::RemoveProtection) {
                     self.notify_tr("Security will be removed when you save");

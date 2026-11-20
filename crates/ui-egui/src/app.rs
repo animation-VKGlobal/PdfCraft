@@ -365,6 +365,7 @@ impl PdfCraftApp {
             printer_marks_draft: Default::default(),
             convert_colours_draft: Default::default(),
             hairlines_draft: Default::default(),
+            output_preview_draft: Default::default(),
         }
     }
 
@@ -453,7 +454,7 @@ impl PdfCraftApp {
         if self.script_pending.as_ref().is_some_and(|pending| pending.has_prompt()) {
             return true;
         }
-        self.dialog.is_some()
+        (self.dialog.is_some() && self.dialog != Some(Dialog::OutputPreview))
             || self.close_request.is_some()
             || self.password_prompt.is_some()
             || self.unlock_prompt.is_some()

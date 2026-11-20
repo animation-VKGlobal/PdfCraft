@@ -434,6 +434,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     c("prepress.marks.remove", "Remove printer marks", None, None, Marks(crate::MarkKind::PrinterMarks), "ruler"),
     c("prepress.convert_colors", "Convert colours…", None, None, Modification, "palette"),
     c("prepress.hairlines", "Fix hairlines…", None, None, Modification, "minus"),
+    c("prepress.output_preview", "Output preview…", None, None, Document, "layers"),
     c("page.properties", "Page properties…", PAGES, None, Modification, "info"),
     c("help.shortcuts", "Keyboard shortcuts", HELP, None, Nothing, "circle-help"),
     c("help.discord", "Join the ArtCraft Discord", HELP, None, Nothing, "messages-square"),

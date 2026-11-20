@@ -14,6 +14,7 @@ pub(super) mod convert_colours_ui;
 pub(super) mod credits;
 pub(super) mod hairlines_ui;
 pub(super) mod marks_ui;
+pub mod output_preview_ui;
 pub(super) mod pageboxes;
 pub(super) mod palette;
 pub(super) mod preferences;
@@ -126,6 +127,10 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
     // A movable window, not this modal: the page under it shows the table as it changes.
     if app.dialog == Some(Dialog::FieldTable) {
         crate::field_table_ui::show(app, ctx);
+        return;
+    }
+    if app.dialog == Some(Dialog::OutputPreview) {
+        output_preview_ui::show(app, ctx);
         return;
     }
     let Some(dialog) = app.dialog else { return };
@@ -272,7 +277,7 @@ fn dialog_body(ui: &mut egui::Ui, app: &mut PdfCraftApp, dialog: Dialog, req: &m
         }
         // Never reached: `dialogs` shows this movable window above and returns before the modal.
         // The arm keeps the match exhaustive.
-        Dialog::FieldTable => req.close = true,
+        Dialog::FieldTable | Dialog::OutputPreview => req.close = true,
         Dialog::Optimize => {
             let (ok, cancel) = crate::optimize_ui::body(ui, &mut app.optimize_draft, &t);
             req.optimize_now = ok;

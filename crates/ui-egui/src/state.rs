@@ -115,6 +115,8 @@ pub enum Dialog {
     ConvertColours,
     /// Print production ▸ Fix hairlines.
     FixHairlines,
+    /// Print production ▸ Output preview.
+    OutputPreview,
     /// Organize pages ▸ Page properties (the tab order of the selected pages).
     PageProps,
     /// Protect Using Password.
