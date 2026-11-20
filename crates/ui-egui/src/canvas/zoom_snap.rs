@@ -229,7 +229,7 @@ impl PdfCraftApp {
 
     /// Render `view_rect` (page view points) of `page` in view `index` at its current zoom:
     /// (width, height, premultiplied RGBA).
-    fn render_area(&self, index: usize, page: usize, view_rect: [f32; 4]) -> Result<(u32, u32, pdfcraft_render::Pixels), String> {
+    pub(crate) fn render_area(&self, index: usize, page: usize, view_rect: [f32; 4]) -> Result<(u32, u32, pdfcraft_render::Pixels), String> {
         let view = self.views.get(index).ok_or("no document")?;
         let doc = self.session.get(view.id).ok_or("no document")?;
         let ppp = self.ctx.as_ref().map_or(2.0, |c| c.pixels_per_point());

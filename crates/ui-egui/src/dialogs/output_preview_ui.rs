@@ -35,6 +35,7 @@ pub struct OutputPreviewDraft {
     pub total_area_coverage_limit: u32,
     pub page_has_transparency: bool,
     pub transparency_blending_space: String,
+    pub last_sample_pos: Option<(usize, [f32; 2])>,
 }
 
 impl Default for OutputPreviewDraft {
@@ -64,6 +65,7 @@ impl Default for OutputPreviewDraft {
             total_area_coverage_limit: 280,
             page_has_transparency: false,
             transparency_blending_space: "DeviceCMYK".into(),
+            last_sample_pos: None,
         }
     }
 }
@@ -309,9 +311,123 @@ pub fn show(app: &mut PdfCraftApp, ctx: &egui::Context) {
         });
 
     if open_page_boxes {
+        app.boxes_draft.range = crate::dialogs::pageboxes::Range::Current;
+        app.boxes_draft.seeded = None;
         app.dialog = Some(Dialog::PageBoxes);
     } else if !is_open {
         app.dialog = None;
+    }
+}
+
+/// Paint page boxes overlay (ArtBox, TrimBox, BleedBox, CropBox) for Output Preview.
+pub(crate) fn paint_output_preview_boxes(
+    painter: &egui::Painter,
+    xf: &crate::canvas::PageXform,
+    info: &pdfcraft_render::DocInfo,
+    doc: &pdfcraft_engine::Document,
+    page: usize,
+) {
+    let boxes = doc.page_boxes();
+    let Some(page_boxes) = boxes.get(page) else { return };
+    let crop = page_boxes[1];
+    let bleed = page_boxes[2];
+    let trim = page_boxes[3];
+    let art = page_boxes[4];
+
+    let items = [
+        ("CropBox", crop, Color32::from_rgb(136, 23, 152)),
+        ("BleedBox", bleed, Color32::from_rgb(0, 120, 215)),
+        ("TrimBox", trim, Color32::from_rgb(16, 137, 62)),
+        ("ArtBox", art, Color32::from_rgb(216, 59, 1)),
+    ];
+
+    let mut drawn_rects: Vec<(egui::Rect, String, Color32)> = Vec::new();
+
+    for (name, b, color) in items {
+        let r = xf.user_rect_f64(info, page, b);
+        if !r.is_positive() {
+            continue;
+        }
+        if let Some(existing) =
+            drawn_rects.iter_mut().find(|(prev, _, _)| (prev.min - r.min).length_sq() < 1.0 && (prev.max - r.max).length_sq() < 1.0)
+        {
+            existing.1.push_str(&format!(", {name}"));
+        } else {
+            drawn_rects.push((r, name.to_string(), color));
+        }
+    }
+
+    for (r, label, color) in drawn_rects {
+        let corners = [r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom(), r.left_top()];
+        let stroke = Stroke::new(1.5, color);
+        painter.extend(egui::Shape::dashed_line(&corners, stroke, 6.0, 3.0));
+
+        let label_pos = r.left_top() + vec2(4.0, 3.0);
+        painter.text(label_pos, egui::Align2::LEFT_TOP, label, theme::semibold(10.5), color);
+    }
+}
+
+impl PdfCraftApp {
+    /// Sample the color under the cursor for Output Preview live CMYK readout.
+    pub(crate) fn sample_output_preview_color(&mut self, index: usize, page: usize, pos: egui::Pos2, _page_rect: egui::Rect) {
+        let Some(view) = self.views.get(index) else { return };
+        let Some(doc) = self.session.get(view.id) else { return };
+        let Some((_, xf)) = view.screen_xforms.iter().find(|(p, _)| *p == page).copied() else { return };
+
+        let (u, v) = xf.screen_to_norm(pos);
+        let vx = u * xf.pw;
+        let vy = v * xf.ph;
+
+        let radius: f32 = match self.output_preview_draft.sample_size.as_str() {
+            "3 by 3 Average" => 1.5,
+            "5 by 5 Average" => 2.5,
+            _ => 0.5,
+        };
+
+        let view_rect =
+            [(vx - radius).clamp(0.0, xf.pw), (vy - radius).clamp(0.0, xf.ph), (vx + radius).clamp(0.0, xf.pw), (vy + radius).clamp(0.0, xf.ph)];
+
+        if view_rect[2] <= view_rect[0] || view_rect[3] <= view_rect[1] {
+            return;
+        }
+
+        if let Ok((w, h, rgba)) = self.render_area(index, page, view_rect)
+            && w > 0
+            && h > 0
+        {
+            let slice: &[u8] = &rgba;
+            let mut total_r: u64 = 0;
+            let mut total_g: u64 = 0;
+            let mut total_b: u64 = 0;
+            let mut count: u64 = 0;
+
+            for chunk in slice.as_chunks::<4>().0 {
+                let a = chunk[3] as f32;
+                if a > 0.0 {
+                    let r = (chunk[0] as f32 * 255.0 / a).min(255.0).round() as u64;
+                    let g = (chunk[1] as f32 * 255.0 / a).min(255.0).round() as u64;
+                    let b = (chunk[2] as f32 * 255.0 / a).min(255.0).round() as u64;
+                    total_r += r;
+                    total_g += g;
+                    total_b += b;
+                    count += 1;
+                } else {
+                    total_r += 255;
+                    total_g += 255;
+                    total_b += 255;
+                    count += 1;
+                }
+            }
+
+            if let (Some(avg_r), Some(avg_g), Some(avg_b)) = (total_r.checked_div(count), total_g.checked_div(count), total_b.checked_div(count)) {
+                self.output_preview_draft.update_sample_rgb(avg_r.min(255) as u8, avg_g.min(255) as u8, avg_b.min(255) as u8);
+            }
+        }
+
+        self.output_preview_draft.page_has_transparency = doc.page_uses_transparency(page);
+        if let Some(cs) = doc.page_transparency_blending_space(page) {
+            self.output_preview_draft.transparency_blending_space = cs;
+        }
     }
 }
 
@@ -371,5 +487,30 @@ mod tests {
         assert_eq!(d.sample_magenta, 0.0);
         assert_eq!(d.sample_yellow, 100.0);
         assert_eq!(d.sample_black, 0.0);
+    }
+
+    #[test]
+    fn sample_size_modes_and_cmyk_averages() {
+        let mut d = OutputPreviewDraft::default();
+        assert_eq!(d.sample_size, "Point Sample");
+        assert!(d.last_sample_pos.is_none());
+
+        d.sample_size = "3 by 3 Average".into();
+        assert_eq!(d.sample_size, "3 by 3 Average");
+
+        d.sample_size = "5 by 5 Average".into();
+        assert_eq!(d.sample_size, "5 by 5 Average");
+
+        // 50% Gray (128, 128, 128)
+        d.update_sample_rgb(128, 128, 128);
+        assert_eq!(d.sample_cyan, 0.0);
+        assert_eq!(d.sample_magenta, 0.0);
+        assert_eq!(d.sample_yellow, 0.0);
+        assert_eq!(d.sample_black, 50.0);
+
+        // Dark blend
+        d.update_sample_rgb(30, 40, 50);
+        assert!(d.sample_black >= 80.0);
+        assert!(d.sample_cyan + d.sample_magenta + d.sample_yellow + d.sample_black > 80.0);
     }
 }

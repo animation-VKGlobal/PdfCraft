@@ -640,8 +640,8 @@ pub struct DocView {
     /// Page sizes (width, height) in points (view space), for mapping text positions to scroll offsets.
     page_sizes: Vec<(f32, f32)>,
     /// Screen rects of the pages drawn last frame (hit-testing, tests, automation).
-    screen_rects: Vec<(usize, Rect)>,
-    screen_xforms: Vec<(usize, PageXform)>,
+    pub(crate) screen_rects: Vec<(usize, Rect)>,
+    pub(crate) screen_xforms: Vec<(usize, PageXform)>,
     /// Pixels per point last frame, for telling a rounding sliver of a page from a visible one.
     screen_ppp: f32,
     /// The scroll viewport on screen last frame.
@@ -1440,6 +1440,7 @@ struct PageEnv<'a> {
     fill_text_border: crate::fill_sign::TextBorder,
     today: (i64, u32, u32),
     can_paste_image: bool,
+    output_preview_boxes: bool,
 }
 
 /// What the page-scroll closure produces for the rest of the frame.
@@ -1845,6 +1846,9 @@ fn draw_page(ui: &mut egui::Ui, view: &mut DocView, frame: &mut PageFrame<'_>, i
     }
     text_layer(ui, view, frame, &slot, &input);
     page_overlays(ui, view, frame, &slot, &input);
+    if frame.env.output_preview_boxes {
+        crate::dialogs::output_preview_ui::paint_output_preview_boxes(ui.painter(), &xf, frame.env.info, frame.env.doc, i);
+    }
 }
 
 #[allow(clippy::cognitive_complexity)]
@@ -3506,6 +3510,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         },
         today,
         can_paste_image,
+        output_preview_boxes: matches!(app.dialog, Some(crate::Dialog::OutputPreview)) && app.output_preview_draft.show_boxes,
     };
     let mut page_out = PageOut::default();
     // Keyed by the view, not the document: with one document in both panes of split view, shared
@@ -3943,6 +3948,19 @@ fn apply_frame_requests(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui, 
     }
     if let Some((source, file, destination)) = remote_open {
         app.open_remote_link(source, file, destination);
+    }
+    if matches!(app.dialog, Some(crate::Dialog::OutputPreview))
+        && let Some(hover) = ui.input(|i| i.pointer.hover_pos())
+        && let Some((page, page_rect)) = app.views[index].screen_rects.iter().find(|(_, r)| r.contains(hover)).copied()
+    {
+        let needs_sample = match app.output_preview_draft.last_sample_pos {
+            Some((p, [x, y])) => p != page || (x - hover.x).powi(2) + (y - hover.y).powi(2) > 0.25,
+            None => true,
+        };
+        if needs_sample {
+            app.output_preview_draft.last_sample_pos = Some((page, [hover.x, hover.y]));
+            app.sample_output_preview_color(index, page, hover, page_rect);
+        }
     }
 }
 

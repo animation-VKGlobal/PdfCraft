@@ -739,6 +739,35 @@ impl Document {
         pdfcraft_model::page_at(&e.cos, page).map_or(1.0, |p| p.user_unit(&e.cos))
     }
 
+    /// Whether page `page` uses transparency (blending, opacity, soft masks, etc.).
+    pub fn page_uses_transparency(&self, page: usize) -> bool {
+        let Some(e) = self.editor.as_ref() else { return false };
+        let pages = pdfcraft_model::pages(&e.cos);
+        let Some(p) = pages.get(page) else { return false };
+        pdfcraft_preflight::page_uses_transparency(&e.cos, &p.dict)
+    }
+
+    /// The page's transparency group blending color space name, if specified.
+    pub fn page_transparency_blending_space(&self, page: usize) -> Option<String> {
+        let e = self.editor.as_ref()?;
+        let pages = pdfcraft_model::pages(&e.cos);
+        let p = pages.get(page)?;
+        let group = p.dict.get(b"Group")?;
+        let group_obj = e.cos.resolve(group);
+        let group_dict = match &*group_obj {
+            pdfcraft_cos::Object::Dict(d) => Some(d),
+            pdfcraft_cos::Object::Stream(s) => Some(&s.dict),
+            _ => None,
+        }?;
+        let cs = group_dict.get(b"CS")?;
+        let cs_obj = e.cos.resolve(cs);
+        match &*cs_obj {
+            pdfcraft_cos::Object::Name(name) => Some(String::from_utf8_lossy(name).to_string()),
+            pdfcraft_cos::Object::Array(arr) => arr.first().and_then(|o| e.cos.resolve(o).as_name().map(|n| String::from_utf8_lossy(n).to_string())),
+            _ => None,
+        }
+    }
+
     /// Current value of a document-information entry (Title, Author, …).
     pub fn info_value(&self, key: &str) -> Option<String> {
         self.editor.as_ref().and_then(|e| pdfcraft_organize::info(&e.cos, key))
