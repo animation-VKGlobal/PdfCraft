@@ -1,0 +1,79 @@
+name: Build Windows Installer (EXE & MSI)
+
+on:
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: "Target architecture (x64 or x86)"
+        required: true
+        default: "x64"
+        type: choice
+        options:
+          - x64
+          - x86
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build Windows Installer (${{ github.event.inputs.arch || 'x64' }})
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Checkout craft-fonts
+        uses: actions/checkout@v4
+        with:
+          repository: storytold/craft-fonts
+          ref: b076417b5880bd4154bd22f00695b1d28c6bea83
+          path: craft-fonts
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Install WiX and Inno Setup
+        shell: pwsh
+        run: |
+          dotnet tool install --global wix --version 5.0.2
+          choco install innosetup --no-progress
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-win-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-win-
+
+      - name: Build Windows Packages
+        shell: pwsh
+        env:
+          CRAFT_FONTS_DIR: ${{ github.workspace }}\craft-fonts
+        run: |
+          ./packaging/windows/package.ps1 -Arch "${{ github.event.inputs.arch || 'x64' }}"
+
+      - name: Upload Windows Installers & Portable ZIP
+        uses: actions/upload-artifact@v4
+        with:
+          name: PdfCraft-Windows-${{ github.event.inputs.arch || 'x64' }}
+          path: |
+            dist/release/*.exe
+            dist/release/*.msi
+            dist/release/*.zip
+          if-no-files-found: error

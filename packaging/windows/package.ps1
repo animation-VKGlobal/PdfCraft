@@ -186,6 +186,23 @@ $Zip = Join-Path $Dist "pdfcraft-$Version-windows-$Arch-portable.zip"
 Remove-Item -Force $Zip -ErrorAction SilentlyContinue
 Compress-Archive -Path $Portable -DestinationPath $Zip
 
+# ---- Inno Setup (Setup.exe) --------------------------------------------------------------------
+$Iscc = (Get-Command iscc -ErrorAction SilentlyContinue)?.Source
+if (-not $Iscc) {
+  $candidate = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+  if (Test-Path $candidate) { $Iscc = $candidate }
+}
+$SetupExe = $null
+if ($Iscc) {
+  $Iss = Join-Path $PSScriptRoot 'setup.iss'
+  $SetupName = "PdfCraft-$Version-windows-$Arch-setup"
+  Invoke-Native 'Inno Setup build' {
+    & $Iscc "/DSourceDir=$Stage" "/DMyAppVersion=$Version" "/DOutputDir=$Dist" "/F$SetupName" $Iss
+  }
+  $SetupExe = Join-Path $Dist "$SetupName.exe"
+  & (Join-Path $PSScriptRoot 'sign.ps1') $SetupExe
+}
+
 # Smoke-test the CLI when this machine can run it. An ARM64 build made on an x64 runner can't run
 # here; .github/workflows/windows-arm64.yml installs and runs it on ARM64 instead.
 $HostArch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString().ToLowerInvariant()
@@ -194,4 +211,4 @@ if ($Arch -ne 'arm64' -or $HostArch -eq 'arm64') {
 } else {
   Write-Output "skipping pdfcraft-cli --version: an $Arch build doesn't run on this $HostArch machine"
 }
-Get-Item $Msi, $Zip | Format-Table Name, Length
+Get-Item @($Msi, $Zip, $SetupExe | Where-Object { $_ -and (Test-Path $_) }) | Format-Table Name, Length
