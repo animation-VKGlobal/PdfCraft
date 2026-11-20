@@ -1,0 +1,73 @@
+name: Build macOS DMG
+
+on:
+  workflow_dispatch:
+    inputs:
+      arch:
+        description: "Target architecture (universal, aarch64, or x86_64)"
+        required: true
+        default: "universal"
+        type: choice
+        options:
+          - universal
+          - aarch64
+          - x86_64
+  push:
+    branches: [main]
+    paths-ignore:
+      - "**.md"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-dmg-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build DMG (${{ github.event.inputs.arch || 'universal' }})
+    runs-on: macos-14
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Checkout craft-fonts
+        uses: actions/checkout@v4
+        with:
+          repository: storytold/craft-fonts
+          ref: b076417b5880bd4154bd22f00695b1d28c6bea83
+          path: craft-fonts
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Cache Cargo dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            target/
+          key: ${{ runner.os }}-cargo-dmg-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-dmg-
+
+      - name: Build macOS DMG
+        env:
+          CRAFT_FONTS_DIR: ${{ github.workspace }}/craft-fonts
+        run: |
+          chmod +x packaging/macos/package.sh
+          ./packaging/macos/package.sh --arch "${{ github.event.inputs.arch || 'universal' }}"
+
+      - name: Upload DMG & CLI artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: PdfCraft-macOS-${{ github.event.inputs.arch || 'universal' }}
+          path: |
+            dist/release/*.dmg
+            dist/release/*.zip
+          if-no-files-found: error
