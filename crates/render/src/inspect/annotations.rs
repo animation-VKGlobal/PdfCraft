@@ -305,13 +305,29 @@ impl<'a> Inspector<'a> {
                     open: p.get(b"Open").ok().and_then(|o| self.resolve(o).as_bool().ok()).unwrap_or(false),
                 })
             });
+            let ds = self.text(d, b"DS");
+            let rc = self.text(d, b"RC");
+            let mut bold = ds.as_deref().is_some_and(|s| s.contains("bold")) || rc.as_deref().is_some_and(|s| s.contains("bold"));
+            let mut italic = ds.as_deref().is_some_and(|s| s.contains("italic")) || rc.as_deref().is_some_and(|s| s.contains("italic"));
+
+            let contents = self.text(d, b"Contents").map(|s| s.replace("\r\n", "\n").replace('\r', "\n")).map(|s| {
+                let (clean, b, i) = strip_markdown_markers(&s);
+                if b {
+                    bold = true;
+                }
+                if i {
+                    italic = true;
+                }
+                clean
+            });
+
             let annotation = Annotation {
                 page,
                 subtype,
                 author: self.text(d, b"T"),
                 // Acrobat ends lines with CR, which the interface would draw as nothing (keep
                 // in step with `pdfcraft_annot::summaries`).
-                contents: self.text(d, b"Contents").map(|s| s.replace("\r\n", "\n").replace('\r', "\n")),
+                contents,
                 modified: self.text(d, b"M").map(|m| pretty_date(&m)),
                 name: self.text(d, b"NM"),
                 in_reply_to,
@@ -329,6 +345,8 @@ impl<'a> Inspector<'a> {
                 points,
                 text_box,
                 popup,
+                bold,
+                italic,
             };
             kept = kept.saturating_add(retained(&annotation).max(raw));
             if kept > MAX_ANNOTATION_BYTES {
@@ -982,6 +1000,24 @@ fn rect4(o: &Object) -> [f32; 4] {
         }
         _ => [0.0; 4],
     }
+}
+
+fn strip_markdown_markers(s: &str) -> (String, bool, bool) {
+    let trimmed = s.trim();
+    if trimmed.len() >= 4 && trimmed.starts_with("**") && trimmed.ends_with("**") {
+        let inner = &trimmed[2..trimmed.len() - 2];
+        if inner.len() >= 2 && inner.starts_with('*') && inner.ends_with('*') {
+            return (inner[1..inner.len() - 1].to_string(), true, true);
+        }
+        return (inner.to_string(), true, false);
+    } else if trimmed.len() >= 2 && trimmed.starts_with('*') && trimmed.ends_with('*') {
+        let inner = &trimmed[1..trimmed.len() - 1];
+        if inner.len() >= 4 && inner.starts_with("**") && inner.ends_with("**") {
+            return (inner[2..inner.len() - 2].to_string(), true, true);
+        }
+        return (inner.to_string(), false, true);
+    }
+    (s.to_string(), false, false)
 }
 
 #[cfg(test)]

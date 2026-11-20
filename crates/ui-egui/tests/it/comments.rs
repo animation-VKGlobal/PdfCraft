@@ -555,9 +555,18 @@ fn selected_text_shows_actions_and_underlines_without_changing_tools() {
     h.get_by_label("Replace text");
     h.get_by_label("Underline").click();
     h.run_steps(3);
+    assert!(matches!(
+        h.state().views[0].comments.composer.as_ref().map(|c| &c.kind),
+        Some(pdfcraft_ui_egui::comments::ComposerKind::TextNote { markup: pdfcraft_engine::Markup::Underline, .. })
+    ));
+    field(&h, "Add a comment").type_text("Please review this line");
+    h.run_steps(2);
+    h.get_by_label("Post").click();
+    h.run_steps(3);
     let c = comments(&h);
     assert_eq!(c.len(), 1);
     assert_eq!(c[0].subtype, "Underline");
+    assert_eq!(c[0].contents.as_deref(), Some("Please review this line"));
     assert!(h.state().views[0].selected_text().is_none());
     assert_eq!(h.state().quick_tool, QuickTool::Select);
 }
@@ -863,6 +872,8 @@ fn the_edit_composer_shows_while_part_of_its_comment_is_on_screen() {
         kind: pdfcraft_ui_egui::comments::ComposerKind::Edit(0),
         text: String::new(),
         focus: true,
+        bold: false,
+        italic: false,
     });
     h.run_steps(2);
     let viewport = h.state().views[0].viewport_rect();

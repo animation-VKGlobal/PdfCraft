@@ -80,6 +80,8 @@ pub(crate) fn context_menu(
                     kind: ComposerKind::Edit(index),
                     text: a.contents.clone().unwrap_or_default(),
                     focus: true,
+                    bold: a.bold,
+                    italic: a.italic,
                 });
                 ui.close();
             }
@@ -164,7 +166,8 @@ pub(crate) fn context_menu(
             if let Some((page, at)) = view.comments.context_at
                 && ui.add_enabled(allowed, egui::Button::new(tl!("Add a sticky note here"))).clicked()
             {
-                view.comments.composer = Some(Composer { page, at, kind: ComposerKind::Note, text: String::new(), focus: true });
+                view.comments.composer =
+                    Some(Composer { page, at, kind: ComposerKind::Note, text: String::new(), focus: true, bold: false, italic: false });
                 ui.close();
             }
             if ui.button(tl!("Comments panel")).clicked() {

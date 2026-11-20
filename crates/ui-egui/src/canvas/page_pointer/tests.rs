@@ -829,7 +829,7 @@ const RAW_KEY_READS: [&str; 17] = [
 /// a window's or a field's own keys, which `PageKeys` would hide, and the pages' reads that
 /// `PageKeys` can't make (chords that wait for the menu bar instead, Escape ending what the pages
 /// hold, any key stopping a glide, the clipboard's hand-off to text fields): (file, function, why).
-const NOT_PAGE_KEYS: [(&str, &str, &str); 17] = [
+const NOT_PAGE_KEYS: [(&str, &str, &str); 18] = [
     (
         "app/clipboard.rs",
         "clipboard_keys",
@@ -852,6 +852,11 @@ const NOT_PAGE_KEYS: [(&str, &str, &str); 17] = [
     ),
     ("canvas/page_input.rs", "cancel_on_escape", "Escape cancels a press the pages hold, which goes on under a dialog opened during it"),
     ("tools/calc_order_ui.rs", "panel", "the Calculation order panel's own Alt+arrows"),
+    (
+        "tools/comments/composer.rs",
+        "format_keys",
+        "the comment field's own Ctrl/Cmd+B and Ctrl/Cmd+I, while it has the focus (the Comments panel's too)",
+    ),
     ("tools/comments/composer.rs", "submit_key", "the comment field's own Enter, while it has the focus (the Comments panel's too)"),
     ("tools/field_table_ui.rs", "show", "the Text field table window's own Escape"),
     ("tools/field_table_ui.rs", "column_dividers", "the Text field table window's own arrows"),

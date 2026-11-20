@@ -3802,6 +3802,8 @@ fn apply_frame_requests(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui, 
                         kind: crate::comments::ComposerKind::Note,
                         text: String::new(),
                         focus: true,
+                        bold: false,
+                        italic: false,
                     });
                 }
             }
@@ -3846,8 +3848,15 @@ fn apply_frame_requests(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui, 
             app.quick_tool = QuickTool::MarqueeZoom;
         }
         Some(PageMenuAction::AddComment(page, at)) => {
-            app.views[index].comments.composer =
-                Some(crate::comments::Composer { page, at, kind: crate::comments::ComposerKind::Note, text: String::new(), focus: true });
+            app.views[index].comments.composer = Some(crate::comments::Composer {
+                page,
+                at,
+                kind: crate::comments::ComposerKind::Note,
+                text: String::new(),
+                focus: true,
+                bold: false,
+                italic: false,
+            });
         }
         Some(PageMenuAction::FlattenComments) => {
             app.views[index].comments.select(None);

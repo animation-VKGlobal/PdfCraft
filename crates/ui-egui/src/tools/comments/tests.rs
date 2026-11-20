@@ -88,6 +88,8 @@ fn an_upright_note_on_a_turned_page_is_in_view_where_it_is_drawn() {
         points: Vec::new(),
         text_box: None,
         popup: None,
+        bold: false,
+        italic: false,
     };
     let page = PageInfo { width: 140.0, height: 200.0, label: String::new(), crop: [0.0, 0.0, 200.0, 140.0], rotation: 90 };
     let xf = PageXform { rect: Rect::from_min_size(Pos2::ZERO, vec2(140.0, 200.0)), rot: 0, pw: 140.0, ph: 200.0 };
@@ -136,6 +138,8 @@ fn listed(page: usize, index: usize, contents: &str, parent: Option<(usize, usiz
         points: Vec::new(),
         text_box: None,
         popup: None,
+        bold: false,
+        italic: false,
     }
 }
 
@@ -233,6 +237,8 @@ fn annotation(subtype: &str, contents: Option<&str>, fill_sign: bool) -> Annotat
         points: Vec::new(),
         text_box: None,
         popup: None,
+        bold: false,
+        italic: false,
     }
 }
 
@@ -440,6 +446,8 @@ fn context_menu_colour_submenu_keeps_its_picker_open_and_a_swatch_closes_the_men
             text_box: None,
             popup: None,
             no_rotate: false,
+            bold: false,
+            italic: false,
         }],
         ..Default::default()
     };
@@ -641,6 +649,8 @@ fn markup_comment_markers_stay_inside_turned_and_zoomed_pages() {
                     points: Vec::new(),
                     text_box: None,
                     popup: None,
+                    bold: false,
+                    italic: false,
                 };
                 let marker = cx.comment_marker_rect(&a).expect("commented markup has a marker");
                 assert!((marker.width() - 12.0).abs() < 0.001 && (marker.height() - 12.0).abs() < 0.001, "{marker:?}");
@@ -686,6 +696,8 @@ fn stale_comment_state_is_cleared_and_delete_never_hits_non_comment_slots() {
         points: Vec::new(),
         text_box: None,
         popup: None,
+        bold: false,
+        italic: false,
     };
     // Page 0 has a Widget at index 0 (not in `info.annotations`), and Text comments at 1 and 2.
     let info = DocInfo {
@@ -696,7 +708,8 @@ fn stale_comment_state_is_cleared_and_delete_never_hits_non_comment_slots() {
     let mut view = DocView::new(pdfcraft_engine::DocId(1), &info, crate::canvas::ViewDefaults::default());
     view.comments.selected = Some((0, 2));
     view.comments.open_editor(0, 2, "draft".into());
-    view.comments.composer = Some(Composer { page: 0, at: [10.0, 10.0], kind: ComposerKind::Edit(2), text: "body".into(), focus: false });
+    view.comments.composer =
+        Some(Composer { page: 0, at: [10.0, 10.0], kind: ComposerKind::Edit(2), text: "body".into(), focus: false, bold: false, italic: false });
     view.comments.gesture = Some(Gesture::Move { page: 0, index: 2, from: pos2(0.0, 0.0) });
 
     // Moving/editing in place or appending a comment at index 3 preserves (0, 2) selection/editing/gesture.
@@ -713,7 +726,8 @@ fn stale_comment_state_is_cleared_and_delete_never_hits_non_comment_slots() {
     shifted.annotations = vec![annot(1, "c2")];
     view.comments.selected = Some((0, 1));
     view.comments.open_editor(0, 1, "for c1, not c2".into());
-    view.comments.composer = Some(Composer { page: 0, at: [10.0, 10.0], kind: ComposerKind::Edit(1), text: "for c1".into(), focus: false });
+    view.comments.composer =
+        Some(Composer { page: 0, at: [10.0, 10.0], kind: ComposerKind::Edit(1), text: "for c1".into(), focus: false, bold: false, italic: false });
     view.comments.gesture = Some(Gesture::Move { page: 0, index: 1, from: pos2(0.0, 0.0) });
     view.document_changed(&shifted);
     assert_eq!(view.comments.selected, None);
@@ -770,6 +784,8 @@ fn an_unnamed_shift_clears_state_for_the_old_index() {
         points: Vec::new(),
         text_box: None,
         popup: None,
+        bold: false,
+        italic: false,
     };
     let info = DocInfo {
         pages: vec![
@@ -782,7 +798,15 @@ fn an_unnamed_shift_clears_state_for_the_old_index() {
     let mut view = DocView::new(pdfcraft_engine::DocId(1), &info, crate::canvas::ViewDefaults::default());
     view.comments.selected = Some((0, 1));
     view.comments.open_editor(0, 1, "the first note".into());
-    view.comments.composer = Some(Composer { page: 0, at: [10.0, 10.0], kind: ComposerKind::Edit(1), text: "the first note".into(), focus: false });
+    view.comments.composer = Some(Composer {
+        page: 0,
+        at: [10.0, 10.0],
+        kind: ComposerKind::Edit(1),
+        text: "the first note".into(),
+        focus: false,
+        bold: false,
+        italic: false,
+    });
     view.comments.gesture = Some(Gesture::Move { page: 0, index: 1, from: pos2(0.0, 0.0) });
     let mut shifted = info.clone();
     shifted.annotations = vec![annot(1)];
@@ -820,6 +844,8 @@ fn a_replace_text_group_makes_replace_text_defaults() {
         points: Vec::new(),
         text_box: None,
         popup: None,
+        bold: false,
+        italic: false,
     };
     let all =
         vec![annot(0, "Caret", Some("Replace"), None), annot(1, "StrikeOut", Some("StrikeOutTextEdit"), Some((0, 0))), annot(2, "Caret", None, None)];
@@ -907,4 +933,54 @@ fn insert_text_icon_is_distinct_from_edit_text_and_matches_its_command() {
     assert_ne!(insert, edit, "adjacent tools need distinct icons");
     assert_eq!(insert, command, "the annotation toolbar and command use the same icon");
     assert!(crate::widgets::icons::exists(insert));
+}
+
+#[test]
+fn comment_keyboard_shortcuts_toggle_bold_and_italic() {
+    let ctx = egui::Context::default();
+    let id = egui::Id::unique("test-shortcuts");
+
+    // Test Ctrl+B toggles bold
+    let input = egui::RawInput {
+        focused: true,
+        events: vec![egui::Event::Key { key: egui::Key::B, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::CTRL }],
+        ..Default::default()
+    };
+    let mut bold = false;
+    let mut italic = false;
+    ctx.run_ui(input, |ui| {
+        let mut text = "Note text".to_string();
+        let field = ui.add(egui::TextEdit::singleline(&mut text).id(id));
+        field.request_focus();
+        format_keys(ui, &field, &mut bold, &mut italic);
+        assert_eq!(text, "Note text", "Text buffer must not have asterisks");
+    })
+    .drop_without_applying_deltas();
+    assert!(bold, "Ctrl+B should toggle bold on");
+
+    // Test Ctrl+I toggles italic
+    let input_italic = egui::RawInput {
+        focused: true,
+        events: vec![egui::Event::Key { key: egui::Key::I, physical_key: None, pressed: true, repeat: false, modifiers: egui::Modifiers::COMMAND }],
+        ..Default::default()
+    };
+    ctx.run_ui(input_italic, |ui| {
+        let mut text = "Note text".to_string();
+        let field = ui.add(egui::TextEdit::singleline(&mut text).id(id));
+        field.request_focus();
+        format_keys(ui, &field, &mut bold, &mut italic);
+        assert_eq!(text, "Note text", "Text buffer must not have asterisks");
+    })
+    .drop_without_applying_deltas();
+    assert!(italic, "Ctrl+I should toggle italic on");
+}
+
+#[test]
+fn format_comment_galley_applies_bold_and_italic() {
+    let ctx = egui::Context::default();
+    ctx.run_ui(egui::RawInput::default(), |ui| {
+        let g = format_comment_galley(ui, "Clean text", 13.0, 200.0, Color32::BLACK, true, true);
+        assert_eq!(g.text(), "Clean text");
+    })
+    .drop_without_applying_deltas();
 }

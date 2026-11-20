@@ -45,6 +45,8 @@ pub struct Summary {
     pub text_box: Option<[f32; 4]>,
     /// The comment's pop-up window (`/Popup`), when it has one.
     pub popup: Option<PopupInfo>,
+    pub bold: bool,
+    pub italic: bool,
 }
 
 impl Summary {
@@ -221,6 +223,22 @@ pub fn summaries(doc: &Document) -> Vec<Summary> {
             let grouped = d.name(b"RT") == Some(b"Group");
             let cross_page = grouped && parent.is_some_and(|(p, _)| p != page);
             let (parent, in_reply_to) = if cross_page { (None, None) } else { (parent, in_reply_to) };
+            let ds = text_value(doc, d, b"DS");
+            let rc = text_value(doc, d, b"RC");
+            let mut bold = ds.as_deref().is_some_and(|s| s.contains("bold")) || rc.as_deref().is_some_and(|s| s.contains("bold"));
+            let mut italic = ds.as_deref().is_some_and(|s| s.contains("italic")) || rc.as_deref().is_some_and(|s| s.contains("italic"));
+
+            let contents = text_value(doc, d, b"Contents").map(|s| s.replace("\r\n", "\n").replace('\r', "\n")).map(|s| {
+                let (clean, b, i) = strip_markdown_markers(&s);
+                if b {
+                    bold = true;
+                }
+                if i {
+                    italic = true;
+                }
+                clean
+            });
+
             out.push(Summary {
                 page,
                 index,
@@ -228,7 +246,7 @@ pub fn summaries(doc: &Document) -> Vec<Summary> {
                 author: text_value(doc, d, b"T"),
                 // Acrobat ends lines with CR, which the interface would draw as nothing (keep in
                 // step with `pdfcraft_render::inspect`).
-                contents: text_value(doc, d, b"Contents").map(|s| s.replace("\r\n", "\n").replace('\r', "\n")),
+                contents,
                 modified: text_value(doc, d, b"M"),
                 name: text_value(doc, d, b"NM"),
                 in_reply_to,
@@ -251,6 +269,8 @@ pub fn summaries(doc: &Document) -> Vec<Summary> {
                 points,
                 text_box,
                 popup: popup_info(doc, entry.as_ref().map(|r| final_ref(doc, r)), d),
+                bold,
+                italic,
             });
         }
     }
@@ -418,4 +438,22 @@ pub(crate) fn line_endings_of(d: &Dict) -> Option<Vec<LineEnding>> {
         b"FreeText" if d.contains(b"CL") => Some(vec![parse(d.name(b"LE").unwrap_or(b"None"))?]),
         _ => None,
     }
+}
+
+fn strip_markdown_markers(s: &str) -> (String, bool, bool) {
+    let trimmed = s.trim();
+    if trimmed.len() >= 4 && trimmed.starts_with("**") && trimmed.ends_with("**") {
+        let inner = &trimmed[2..trimmed.len() - 2];
+        if inner.len() >= 2 && inner.starts_with('*') && inner.ends_with('*') {
+            return (inner[1..inner.len() - 1].to_string(), true, true);
+        }
+        return (inner.to_string(), true, false);
+    } else if trimmed.len() >= 2 && trimmed.starts_with('*') && trimmed.ends_with('*') {
+        let inner = &trimmed[1..trimmed.len() - 1];
+        if inner.len() >= 4 && inner.starts_with("**") && inner.ends_with("**") {
+            return (inner[2..inner.len() - 2].to_string(), true, true);
+        }
+        return (inner.to_string(), false, true);
+    }
+    (s.to_string(), false, false)
 }

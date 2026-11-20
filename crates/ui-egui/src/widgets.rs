@@ -438,17 +438,28 @@ pub fn label_ltr_truncated(ui: &mut egui::Ui, text: impl Into<String>, font: egu
 /// in a right-to-left script (Persian, Arabic, Hebrew) reads right to left and sits against the
 /// right edge ([`crate::bidi::wrap`]); text without one is an ordinary wrapping label.
 /// `truncate` keeps the first line only, with an ellipsis where the text goes on.
+#[allow(dead_code)]
 pub fn wrapped_text(ui: &mut egui::Ui, text: &str, font: egui::FontId, color: Color32, truncate: bool) -> Response {
+    wrapped_text_styled(ui, text, font, color, truncate, false, false)
+}
+
+/// Like [`wrapped_text`], but with explicit bold and italic styling.
+pub fn wrapped_text_styled(ui: &mut egui::Ui, text: &str, font: egui::FontId, color: Color32, truncate: bool, bold: bool, italic: bool) -> Response {
+    let font_id = if bold { theme::semibold(font.size) } else { font };
     if !crate::bidi::has_rtl(text) {
-        let mut label = egui::Label::new(egui::RichText::new(text).font(font).color(color)).wrap();
+        let mut rich = egui::RichText::new(text).font(font_id).color(color);
+        if italic {
+            rich = rich.italics();
+        }
+        let mut label = egui::Label::new(rich).wrap();
         if truncate {
             label = label.truncate();
         }
         return ui.add(label);
     }
     let width = ui.available_width().max(1.0);
-    let lines = wrapped_lines(ui, text, &font, width, truncate);
-    let galleys: Vec<_> = lines.iter().map(|line| (line.rtl, wrapped_line_galley(ui, line, &font, color))).collect();
+    let lines = wrapped_lines(ui, text, &font_id, width, truncate);
+    let galleys: Vec<_> = lines.iter().map(|line| (line.rtl, wrapped_line_galley(ui, line, &font_id, color))).collect();
     let height = galleys.iter().map(|(_, g)| g.size().y).sum();
     let (rect, resp) = ui.allocate_exact_size(vec2(width, height), Sense::hover());
     // Painted text only: the accessibility name keeps the logical order.

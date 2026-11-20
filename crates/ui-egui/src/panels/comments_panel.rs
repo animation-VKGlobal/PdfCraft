@@ -133,14 +133,22 @@ pub(crate) fn show(
     }
     // "Add a comment": a sticky note on the current page, near its top-right corner.
     if allowed {
+        let id_salt = "comment-add-box";
+        let mut bold = false;
+        let mut italic = false;
+        let mut layouter = |ui: &egui::Ui, text: &dyn egui::TextBuffer, wrap: f32| {
+            crate::comments::format_comment_galley(ui, text.as_str(), 13.0, wrap, t.text, bold, italic)
+        };
         let r = ui
             .add(
                 crate::widgets::line(&mut view.comments.add_box)
+                    .layouter(&mut layouter)
                     .hint_text(tl!("Add a comment"))
                     .desired_width(f32::INFINITY)
-                    .id_salt("comment-add-box"),
+                    .id_salt(id_salt),
             )
             .accessible_name(tl!("Add a comment"));
+        crate::comments::format_keys(ui, &r, &mut bold, &mut italic);
         if r.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter)) && !view.comments.add_box.trim().is_empty() {
             let page = view.current.min(info.pages.len().saturating_sub(1));
             if let Some(p) = info.pages.get(page) {
@@ -482,7 +490,7 @@ fn card(ui: &mut egui::Ui, view: &mut DocView, context: CardContext<'_>) -> Opti
                         }
                         ui.add(label);
                     } else {
-                        widgets::wrapped_text(ui, body, theme::regular(13.0), t.text, !selected);
+                        widgets::wrapped_text_styled(ui, body, theme::regular(13.0), t.text, !selected, a.bold, a.italic);
                     }
                 }
                 // One badge per reviewer, with their name: a state is "for the specified user"
@@ -530,7 +538,15 @@ fn card(ui: &mut egui::Ui, view: &mut DocView, context: CardContext<'_>) -> Opti
                                 edit = Some(e);
                             }
                         } else {
-                            widgets::wrapped_text(ui, r.contents.as_deref().unwrap_or(""), theme::regular(12.5), t.text, false);
+                            widgets::wrapped_text_styled(
+                                ui,
+                                r.contents.as_deref().unwrap_or(""),
+                                theme::regular(12.5),
+                                t.text,
+                                false,
+                                r.bold,
+                                r.italic,
+                            );
                         }
                     });
                 });
@@ -547,14 +563,22 @@ fn card(ui: &mut egui::Ui, view: &mut DocView, context: CardContext<'_>) -> Opti
                     // The field fills its line and Post sits right-aligned under it: a field sized
                     // around the button can't fit every language's "Post" exactly, and any overflow
                     // would widen the resizable panel again on every repaint.
+                    let id_salt = ("comment-reply", key);
+                    let mut bold = false;
+                    let mut italic = false;
+                    let mut layouter = |ui: &egui::Ui, text: &dyn egui::TextBuffer, wrap: f32| {
+                        crate::comments::format_comment_galley(ui, text.as_str(), 13.0, wrap, t.text, bold, italic)
+                    };
                     let r = ui.add(
                         crate::widgets::block(&mut view.comments.reply)
+                            .layouter(&mut layouter)
                             .desired_rows(1)
                             .return_key(egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, egui::Key::Enter))
                             .hint_text(tl!("Add a reply"))
                             .desired_width(f32::INFINITY)
-                            .id_salt(("comment-reply", key)),
+                            .id_salt(id_salt),
                     );
+                    crate::comments::format_keys(ui, &r, &mut bold, &mut italic);
                     let enter = crate::comments::submit_key(ui, &r, true);
                     let ok = !view.comments.reply.trim().is_empty();
                     let post =
@@ -676,7 +700,14 @@ fn card(ui: &mut egui::Ui, view: &mut DocView, context: CardContext<'_>) -> Opti
 fn inline_editor(ui: &mut egui::Ui, t: &Tokens, view: &mut DocView, key: (usize, usize), rows: usize) -> Option<Edit> {
     let mut edit = None;
     let (_, _, text) = view.comments.editing.as_mut()?;
-    let r = ui.add(crate::widgets::block(text).desired_rows(rows).desired_width(f32::INFINITY).id_salt(("comment-edit", key)));
+    let id_salt = ("comment-edit", key);
+    let mut bold = false;
+    let mut italic = false;
+    let mut layouter = |ui: &egui::Ui, text: &dyn egui::TextBuffer, wrap: f32| {
+        crate::comments::format_comment_galley(ui, text.as_str(), 13.0, wrap, t.text, bold, italic)
+    };
+    let r = ui.add(crate::widgets::block(text).layouter(&mut layouter).desired_rows(rows).desired_width(f32::INFINITY).id_salt(id_salt));
+    crate::comments::format_keys(ui, &r, &mut bold, &mut italic);
     match view.comments.editor_focus.take() {
         Some(crate::comments::EditorFocus::Take) => r.request_focus(),
         Some(crate::comments::EditorFocus::Release) => r.surrender_focus(),

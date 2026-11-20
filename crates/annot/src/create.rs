@@ -520,6 +520,22 @@ pub fn add_annotation(doc: &mut Document, new: &NewAnnotation, meta: &Meta) -> R
         // Survives a later subject edit, so flatten-on-save still finds the mark.
         d.set(b"PCFillSign".to_vec(), Object::Bool(true));
     }
+    if style.bold || style.italic {
+        let (weight, slant) = match (style.bold, style.italic) {
+            (true, true) => ("bold", "italic"),
+            (true, false) => ("bold", "normal"),
+            (false, true) => ("normal", "italic"),
+            (false, false) => ("normal", "normal"),
+        };
+        let esc = |s: &str| s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;");
+        let body: String = new.contents.split('\n').map(|line| format!("<p dir=\"ltr\">{}</p>", esc(line.trim_end_matches('\r')))).collect();
+        let rc = format!(
+            "<?xml version=\"1.0\"?><body xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:xfa=\"http://www.xfa.org/schema/xfa-data/1.0/\" xfa:spec=\"2.0.2\" style=\"font-size:12pt;text-align:left;font-weight:{weight};font-style:{slant};font-family:Helvetica;font-stretch:normal\">{body}</body>"
+        );
+        let keywords = format!("{}{}", if style.italic { "italic " } else { "" }, if style.bold { "bold " } else { "" });
+        d.set(b"DS".to_vec(), PdfString::text(&format!("font: {keywords}Helvetica 12pt; text-align:left;")));
+        d.set(b"RC".to_vec(), PdfString::text(&rc));
+    }
     // A redaction's overlay text becomes page content when it is applied, where `?` would be there
     // for good: refused before anything is added. A comment's own text is stored as typed and
     // drawn with `?` for what the standard fonts can't draw (marked, see `draw_appearance`).

@@ -381,6 +381,8 @@ pub struct Annotation {
     pub text_box: Option<[f32; 4]>,
     /// The comment's pop-up window (`/Popup`): where it sits and whether it is open.
     pub popup: Option<Popup>,
+    pub bold: bool,
+    pub italic: bool,
 }
 
 /// How far [`group_primaries`] follows `/IRT` from a group subordinate to its primary.
@@ -908,6 +910,8 @@ mod review_state_tests {
                 points: Vec::new(),
                 text_box: None,
                 popup: None,
+                bold: false,
+                italic: false,
             })
             .collect();
         link_replies(&mut all);

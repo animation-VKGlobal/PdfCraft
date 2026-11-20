@@ -42,6 +42,7 @@ pub enum ComposerKind {
     /// A comment anchored to selected text; replacing the composer drops its quads.
     TextNote {
         quads: Vec<[f64; 8]>,
+        markup: super::Markup,
     },
     /// A text box; `size` is the box dragged out (displayed width and height, in user space
     /// units), `None` after a click: then the box fits its text.
@@ -72,6 +73,8 @@ pub struct Composer {
     pub kind: ComposerKind,
     pub text: String,
     pub focus: bool,
+    pub bold: bool,
+    pub italic: bool,
 }
 
 /// A released drawing gesture waiting for the page raster to show its annotation.

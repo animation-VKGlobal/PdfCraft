@@ -428,5 +428,12 @@ pub(super) fn edited_in_view(cx: &PageCx<'_>, index: usize, viewport: Rect) -> b
 }
 
 pub(super) fn new_comment(cx: &PageCx<'_>, tool: CommentTool, shape: Shape, contents: String) -> Edit {
-    Edit::AddAnnotation(NewAnnotation { page: cx.page, shape, style: cx.prefs.style(tool), contents, author: cx.prefs.author.clone() })
+    new_comment_styled(cx, tool, shape, contents, false, false)
+}
+
+pub(super) fn new_comment_styled(cx: &PageCx<'_>, tool: CommentTool, shape: Shape, contents: String, bold: bool, italic: bool) -> Edit {
+    let mut style = cx.prefs.style(tool);
+    style.bold = bold;
+    style.italic = italic;
+    Edit::AddAnnotation(NewAnnotation { page: cx.page, shape, style, contents, author: cx.prefs.author.clone() })
 }

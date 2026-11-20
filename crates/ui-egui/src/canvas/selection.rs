@@ -518,24 +518,43 @@ pub(super) fn selection_actions(
                 view.comments.replace = Some(quads);
                 comments::ComposerKind::Replace
             } else {
-                comments::ComposerKind::TextNote { quads }
+                comments::ComposerKind::TextNote { quads, markup: pdfcraft_engine::Markup::Highlight }
             };
-            view.comments.composer = Some(comments::Composer { page, at, kind, text: String::new(), focus: true });
+            view.comments.composer = Some(comments::Composer { page, at, kind, text: String::new(), focus: true, bold: false, italic: false });
         }
         SelectionAction::Markup(tool) => {
             // Every markup button carries a markup tool; anything else adds nothing.
             let Some(kind) = tool.markup() else { return false };
-            view.clear_selection();
-            let edits = marks.into_iter().map(|(page, quads)| {
-                Edit::AddAnnotation(pdfcraft_engine::NewAnnotation {
+            if marks.len() == 1 {
+                // On a single page, let the reader add the comment while creating the markup,
+                // instead of committing an empty annotation and requiring a second click.
+                let Some((page, quads)) = marks.into_iter().next() else { return false };
+                let last = quads.last().copied().unwrap_or_default();
+                let at = [last[2].max(last[6]), last[1].max(last[3])];
+                view.clear_selection();
+                view.comments.composer = Some(comments::Composer {
                     page,
-                    shape: pdfcraft_engine::Shape::TextMarkup { kind, quads },
-                    style: prefs.style(tool),
-                    contents: String::new(),
-                    author: prefs.author.clone(),
-                })
-            });
-            view.pending_edit = view.selection_marks_edit(edits.collect(), selection.head_page());
+                    at,
+                    kind: comments::ComposerKind::TextNote { quads, markup: kind },
+                    text: String::new(),
+                    focus: true,
+                    bold: false,
+                    italic: false,
+                });
+            } else {
+                // Multi-page markup remains a single batch; the composer is page-anchored.
+                view.clear_selection();
+                let edits = marks.into_iter().map(|(page, quads)| {
+                    Edit::AddAnnotation(pdfcraft_engine::NewAnnotation {
+                        page,
+                        shape: pdfcraft_engine::Shape::TextMarkup { kind, quads },
+                        style: prefs.style(tool),
+                        contents: String::new(),
+                        author: prefs.author.clone(),
+                    })
+                });
+                view.pending_edit = view.selection_marks_edit(edits.collect(), selection.head_page());
+            }
         }
         // Copy is dispatched through the app after the view borrow ends.
         SelectionAction::Copy => {}

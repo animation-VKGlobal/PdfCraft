@@ -29,7 +29,7 @@ mod paint;
 mod popups;
 mod state;
 
-pub(crate) use composer::{composer, submit_key};
+pub(crate) use composer::{composer, format_comment_galley, format_keys, submit_key};
 #[cfg(test)]
 use geometry::handle_pos;
 #[cfg(test)]

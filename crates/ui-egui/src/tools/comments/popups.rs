@@ -209,18 +209,26 @@ fn text_box(ui: &mut egui::Ui, parts: &mut Parts<'_>, a: &Annotation, name: &str
     if parts.allowed && !a.locked {
         let typed = parts.cv.popup_text.as_ref().filter(|(p, i, _)| (*p, *i) == key).map(|(_, _, s)| s.clone());
         let mut text = typed.unwrap_or_else(|| a.contents.clone().unwrap_or_default());
+        let id_salt = ("popup-text", a.page, a.index);
+        let mut bold = a.bold;
+        let mut italic = a.italic;
+        let mut layouter = |ui: &egui::Ui, text: &dyn egui::TextBuffer, wrap: f32| {
+            super::composer::format_comment_galley(ui, text.as_str(), 12.5, wrap, parts.pal.ink, bold, italic)
+        };
         let field = ui
             .add(
                 egui::TextEdit::multiline(&mut text)
+                    .layouter(&mut layouter)
                     .desired_rows(1)
                     .desired_width(f32::INFINITY)
                     .font(theme::regular(12.5))
                     .text_color(parts.pal.ink)
                     .background_color(Color32::WHITE)
                     .margin(egui::Margin::symmetric(4, 2))
-                    .id_salt(("popup-text", a.page, a.index)),
+                    .id_salt(id_salt),
             )
             .accessible_name(name);
+        super::composer::format_keys(ui, &field, &mut bold, &mut italic);
         if field.changed() {
             parts.cv.popup_text = Some((a.page, a.index, text.clone()));
         }
@@ -233,7 +241,8 @@ fn text_box(ui: &mut egui::Ui, parts: &mut Parts<'_>, a: &Annotation, name: &str
     } else {
         egui::Frame::NONE.fill(Color32::WHITE).inner_margin(egui::Margin::symmetric(4, 2)).show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.label(egui::RichText::new(a.contents.as_deref().unwrap_or_default()).font(theme::regular(12.5)).color(parts.pal.ink));
+            let contents = a.contents.as_deref().unwrap_or_default();
+            crate::widgets::wrapped_text_styled(ui, contents, theme::regular(12.5), parts.pal.ink, false, a.bold, a.italic);
         });
     }
 }
@@ -262,8 +271,15 @@ fn footer(ui: &mut egui::Ui, parts: &mut Parts<'_>, a: &Annotation) {
         });
     }
     let Some(mut reply) = parts.cv.popup_reply.as_ref().filter(|(p, i, _)| (*p, *i) == key).map(|(_, _, s)| s.clone()) else { return };
+    let id_salt = ("popup-reply", a.page, a.index);
+    let mut bold = false;
+    let mut italic = false;
+    let mut layouter = |ui: &egui::Ui, text: &dyn egui::TextBuffer, wrap: f32| {
+        super::composer::format_comment_galley(ui, text.as_str(), 12.5, wrap, parts.pal.ink, bold, italic)
+    };
     let field = ui.add(
         egui::TextEdit::multiline(&mut reply)
+            .layouter(&mut layouter)
             .desired_rows(1)
             .desired_width(f32::INFINITY)
             .hint_text(tl!("Add a reply"))
@@ -271,8 +287,9 @@ fn footer(ui: &mut egui::Ui, parts: &mut Parts<'_>, a: &Annotation) {
             .text_color(parts.pal.ink)
             .background_color(Color32::WHITE)
             .margin(egui::Margin::symmetric(4, 2))
-            .id_salt(("popup-reply", a.page, a.index)),
+            .id_salt(id_salt),
     );
+    super::composer::format_keys(ui, &field, &mut bold, &mut italic);
     if opened {
         field.request_focus();
     }

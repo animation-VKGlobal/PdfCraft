@@ -1,5 +1,5 @@
 use super::geometry::{drawn_text_box_rect, page_rotation, text_box_rect};
-use super::paint::{edited_in_view, new_comment};
+use super::paint::{edited_in_view, new_comment_styled};
 use super::state::{ComposerKind, PageCx};
 use super::{
     Color32, CommentPrefs, CommentTool, CornerRadius, DocInfo, DocView, Edit, LineEnding, Markup, NoteIcon, PagePointer, QuickTool, Shape, Tokens,
@@ -65,6 +65,22 @@ pub(crate) fn composer(ctx: &egui::Context, keys: PageKeys, view: &mut DocView, 
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new(prefs.author.clone()).font(theme::semibold(13.0)));
                 ui.label(egui::RichText::new(tl!(title)).font(theme::regular(11.5)).color(t.text_faint));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let btn_i = egui::Button::new(egui::RichText::new("I").italics().font(theme::regular(12.0)))
+                        .min_size(egui::vec2(22.0, 20.0))
+                        .fill(if c.italic { t.accent.gamma_multiply(0.2) } else { Color32::TRANSPARENT })
+                        .stroke(if c.italic { egui::Stroke::new(1.0, t.accent) } else { egui::Stroke::NONE });
+                    if ui.add(btn_i).on_hover_text(tl!("Italic (Ctrl+I)")).clicked() {
+                        c.italic = !c.italic;
+                    }
+                    let btn_b = egui::Button::new(egui::RichText::new("B").font(theme::semibold(12.0)))
+                        .min_size(egui::vec2(22.0, 20.0))
+                        .fill(if c.bold { t.accent.gamma_multiply(0.2) } else { Color32::TRANSPARENT })
+                        .stroke(if c.bold { egui::Stroke::new(1.0, t.accent) } else { egui::Stroke::NONE });
+                    if ui.add(btn_b).on_hover_text(tl!("Bold (Ctrl+B)")).clicked() {
+                        c.bold = !c.bold;
+                    }
+                });
             });
             ui.add_space(6.0);
             let hint = match c.kind {
@@ -73,14 +89,27 @@ pub(crate) fn composer(ctx: &egui::Context, keys: PageKeys, view: &mut DocView, 
                 ComposerKind::Replace => tl!("Replacement text"),
                 _ => tl!("Add a comment"),
             };
+            let text_id = ui.scope_id().with("composer-text");
+            let (is_bold, is_italic) = (c.bold, c.italic);
+            let mut layouter = move |ui: &egui::Ui, text: &dyn egui::TextBuffer, wrap: f32| {
+                format_comment_galley(ui, text.as_str(), 13.0, wrap, t.text, is_bold, is_italic)
+            };
             let edit = ui
-                .add(egui::TextEdit::multiline(&mut c.text).hint_text(hint).desired_rows(3).desired_width(f32::INFINITY).id_salt("composer-text"))
+                .add(
+                    egui::TextEdit::multiline(&mut c.text)
+                        .hint_text(hint)
+                        .desired_rows(3)
+                        .desired_width(f32::INFINITY)
+                        .id(text_id)
+                        .layouter(&mut layouter),
+                )
                 // 0.37 kittest rejects an unnamed text input; the hint is its logical name.
                 .accessible_name(hint);
             if c.focus {
                 edit.request_focus();
                 c.focus = false;
             }
+            format_keys(ui, &edit, &mut c.bold, &mut c.italic);
             let enter = submit_key(ui, &edit, false);
             if keys.pressed(ui.ctx(), egui::Key::Escape) {
                 cancel = true;
@@ -113,6 +142,7 @@ pub(crate) fn composer(ctx: &egui::Context, keys: PageKeys, view: &mut DocView, 
     if !post {
         return None;
     }
+    let (bold, italic) = (c.bold, c.italic);
     let c = view.comments.composer.take()?;
     let typewriter_edit = matches!(c.kind, ComposerKind::Edit(index) if info.annotations.iter().any(|a|
         a.page == page && a.index == index && a.subtype == "FreeText" && a.intent.as_deref() == Some("FreeTextTypeWriter")
@@ -124,11 +154,17 @@ pub(crate) fn composer(ctx: &egui::Context, keys: PageKeys, view: &mut DocView, 
         }
         ComposerKind::Note => {
             view.comments.tool_done = true;
-            Some(new_comment(&cx, CommentTool::Note, Shape::Note { at: c.at, icon: NoteIcon::Comment }, text))
+            Some(new_comment_styled(&cx, CommentTool::Note, Shape::Note { at: c.at, icon: NoteIcon::Comment }, text, bold, italic))
         }
-        ComposerKind::TextNote { quads } => {
+        ComposerKind::TextNote { quads, markup } => {
             view.comments.tool_done = true;
-            Some(new_comment(&cx, CommentTool::Highlight, Shape::TextMarkup { kind: Markup::Highlight, quads }, text))
+            let tool = match markup {
+                Markup::Highlight => CommentTool::Highlight,
+                Markup::Underline => CommentTool::Underline,
+                Markup::StrikeOut => CommentTool::StrikeOut,
+                Markup::Squiggly => CommentTool::Squiggly,
+            };
+            Some(new_comment_styled(&cx, tool, Shape::TextMarkup { kind: markup, quads }, text, bold, italic))
         }
         ComposerKind::TextBox { size } => {
             view.comments.tool_done = true;
@@ -139,7 +175,7 @@ pub(crate) fn composer(ctx: &egui::Context, keys: PageKeys, view: &mut DocView, 
                 (Some(size), Some(p)) => drawn_text_box_rect(p, c.at, size, &text, font_size, border),
                 _ => text_box_rect(c.at, &text, font_size, rotation),
             };
-            Some(new_comment(&cx, CommentTool::TextBox, Shape::TextBox { rect, font_size }, text))
+            Some(new_comment_styled(&cx, CommentTool::TextBox, Shape::TextBox { rect, font_size }, text, bold, italic))
         }
         ComposerKind::Callout { point } => {
             view.comments.tool_done = true;
@@ -147,7 +183,14 @@ pub(crate) fn composer(ctx: &egui::Context, keys: PageKeys, view: &mut DocView, 
             let font_size = prefs.font_size(CommentTool::Callout).unwrap_or(10.0);
             let rect = text_box_rect(c.at, &text, font_size, 0);
             let knee = pdfcraft_engine::callout_knee(rect, point);
-            Some(new_comment(&cx, CommentTool::Callout, Shape::Callout { rect, knee, point, font_size, ending: LineEnding::OpenArrow }, text))
+            Some(new_comment_styled(
+                &cx,
+                CommentTool::Callout,
+                Shape::Callout { rect, knee, point, font_size, ending: LineEnding::OpenArrow },
+                text,
+                bold,
+                italic,
+            ))
         }
         ComposerKind::Replace => {
             view.comments.tool_done = true;
@@ -168,7 +211,7 @@ pub(crate) fn composer(ctx: &egui::Context, keys: PageKeys, view: &mut DocView, 
             view.comments.tool_done = true;
             let [x, y] = c.at;
             let half = size / 2.0;
-            Some(new_comment(&cx, CommentTool::Caret, Shape::Caret { rect: [x - half, y - size, x + half, y] }, text))
+            Some(new_comment_styled(&cx, CommentTool::Caret, Shape::Caret { rect: [x - half, y - size, x + half, y] }, text, bold, italic))
         }
     }
 }
@@ -192,4 +235,52 @@ pub(crate) fn submit_key(ui: &mut egui::Ui, field: &egui::Response, plain_enter:
             });
             submit
         })
+}
+
+/// Handle bold (Ctrl/Cmd+B) and italic (Ctrl/Cmd+I) shortcuts for comment editors.
+pub(crate) fn format_keys(ui: &mut egui::Ui, field: &egui::Response, bold: &mut bool, italic: &mut bool) {
+    if !field.has_focus() {
+        return;
+    }
+    let mut toggle_bold = false;
+    let mut toggle_italic = false;
+    ui.input_mut(|input| {
+        input.events.retain(|event| {
+            if let egui::Event::Key { key, pressed: true, modifiers, .. } = event {
+                let cmd_or_ctrl = (modifiers.command || modifiers.ctrl) && !modifiers.shift && !modifiers.alt;
+                if *key == egui::Key::B && cmd_or_ctrl {
+                    toggle_bold = true;
+                    return false;
+                }
+                if *key == egui::Key::I && cmd_or_ctrl {
+                    toggle_italic = true;
+                    return false;
+                }
+            }
+            true
+        });
+    });
+    if toggle_bold {
+        *bold = !*bold;
+    }
+    if toggle_italic {
+        *italic = !*italic;
+    }
+}
+
+/// Render comment text in TextEdit with visual bold (semibold) and italic styling.
+pub(crate) fn format_comment_galley(
+    ui: &egui::Ui,
+    text: &str,
+    font_size: f32,
+    wrap_width: f32,
+    text_color: Color32,
+    bold: bool,
+    italic: bool,
+) -> std::sync::Arc<egui::Galley> {
+    let mut job = egui::text::LayoutJob::default();
+    job.wrap.max_width = wrap_width;
+    let font_id = if bold { theme::semibold(font_size) } else { theme::regular(font_size) };
+    job.append(text, 0.0, egui::TextFormat { font_id, color: text_color, italics: italic, ..Default::default() });
+    ui.painter().layout_job(job)
 }
