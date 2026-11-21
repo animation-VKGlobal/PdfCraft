@@ -694,7 +694,7 @@ impl Automation {
     pub(crate) fn comment_reply(&mut self, a: &Args) -> Result<Value> {
         let (page, index) = self.comment_target(a)?;
         let author = a.opt_str("author")?.unwrap_or(DEFAULT_AUTHOR).to_string();
-        self.apply(a, Edit::ReplyToAnnotation { page, index, text: a.str("text")?.to_string(), author })
+        self.apply(a, Edit::ReplyToAnnotation { page, index, text: a.str("text")?.to_string(), author, rc: None })
     }
 
     pub(crate) fn comment_set_status(&mut self, a: &Args) -> Result<Value> {
@@ -755,7 +755,7 @@ impl Automation {
         let info = self.doc(a)?.info.pages[page].clone();
         let mut edits = Vec::new();
         if let Some(text) = a.opt_str("contents")? {
-            edits.push(Edit::SetAnnotationContents { page, index, text: text.to_string() });
+            edits.push(Edit::SetAnnotationContents { page, index, text: text.to_string(), rc: None });
         }
         let (color, opacity, width) = (a.color("color")?, a.opt_num("opacity")?, a.opt_num("width")?);
         if color.is_some() || opacity.is_some() || width.is_some() {

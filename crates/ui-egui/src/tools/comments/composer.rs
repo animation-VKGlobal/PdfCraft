@@ -166,7 +166,9 @@ pub(crate) fn composer(ctx: &egui::Context, keys: PageKeys, view: &mut DocView, 
     if !post {
         return None;
     }
-    let (bold, italic) = (c.bold || c.styles.iter().any(|s| s.bold), c.italic || c.styles.iter().any(|s| s.italic));
+    let (all_bold, all_italic) = (!c.styles.is_empty() && c.styles.iter().all(|s| s.bold), !c.styles.is_empty() && c.styles.iter().all(|s| s.italic));
+    let any_styling = c.styles.iter().any(|s| s.bold || s.italic || s.underline || s.color.is_some());
+    let rc = if any_styling { Some(styles_to_rc(&c.text, &c.styles, c.bold, c.italic)) } else { None };
     let c = view.comments.composer.take()?;
     let typewriter_edit = matches!(c.kind, ComposerKind::Edit(index) if info.annotations.iter().any(|a|
         a.page == page && a.index == index && a.subtype == "FreeText" && a.intent.as_deref() == Some("FreeTextTypeWriter")
@@ -174,11 +176,11 @@ pub(crate) fn composer(ctx: &egui::Context, keys: PageKeys, view: &mut DocView, 
     let text = if typewriter_edit { c.text } else { c.text.trim_end().to_string() };
     match c.kind {
         ComposerKind::Edit(index) => {
-            info.annotations.iter().any(|a| a.page == page && a.index == index).then_some(Edit::SetAnnotationContents { page, index, text })
+            info.annotations.iter().any(|a| a.page == page && a.index == index).then_some(Edit::SetAnnotationContents { page, index, text, rc })
         }
         ComposerKind::Note => {
             view.comments.tool_done = true;
-            Some(new_comment_styled(&cx, CommentTool::Note, Shape::Note { at: c.at, icon: NoteIcon::Comment }, text, bold, italic))
+            Some(new_comment_styled(&cx, CommentTool::Note, Shape::Note { at: c.at, icon: NoteIcon::Comment }, text, all_bold, all_italic, rc))
         }
         ComposerKind::TextNote { quads, markup } => {
             view.comments.tool_done = true;
@@ -188,7 +190,7 @@ pub(crate) fn composer(ctx: &egui::Context, keys: PageKeys, view: &mut DocView, 
                 Markup::StrikeOut => CommentTool::StrikeOut,
                 Markup::Squiggly => CommentTool::Squiggly,
             };
-            Some(new_comment_styled(&cx, tool, Shape::TextMarkup { kind: markup, quads }, text, bold, italic))
+            Some(new_comment_styled(&cx, tool, Shape::TextMarkup { kind: markup, quads }, text, all_bold, all_italic, rc))
         }
         ComposerKind::TextBox { size } => {
             view.comments.tool_done = true;
@@ -199,11 +201,10 @@ pub(crate) fn composer(ctx: &egui::Context, keys: PageKeys, view: &mut DocView, 
                 (Some(size), Some(p)) => drawn_text_box_rect(p, c.at, size, &text, font_size, border),
                 _ => text_box_rect(c.at, &text, font_size, rotation),
             };
-            Some(new_comment_styled(&cx, CommentTool::TextBox, Shape::TextBox { rect, font_size }, text, bold, italic))
+            Some(new_comment_styled(&cx, CommentTool::TextBox, Shape::TextBox { rect, font_size }, text, all_bold, all_italic, rc))
         }
         ComposerKind::Callout { point } => {
             view.comments.tool_done = true;
-            // A callout's leader and box stay in user-space axes (its appearance isn't turned).
             let font_size = prefs.font_size(CommentTool::Callout).unwrap_or(10.0);
             let rect = text_box_rect(c.at, &text, font_size, 0);
             let knee = pdfcraft_engine::callout_knee(rect, point);
@@ -212,8 +213,9 @@ pub(crate) fn composer(ctx: &egui::Context, keys: PageKeys, view: &mut DocView, 
                 CommentTool::Callout,
                 Shape::Callout { rect, knee, point, font_size, ending: LineEnding::OpenArrow },
                 text,
-                bold,
-                italic,
+                all_bold,
+                all_italic,
+                rc,
             ))
         }
         ComposerKind::Replace => {
@@ -225,9 +227,6 @@ pub(crate) fn composer(ctx: &egui::Context, keys: PageKeys, view: &mut DocView, 
                 text,
                 author: prefs.author.clone(),
                 strike: prefs.style(CommentTool::ReplaceText),
-                // One proposal, one look: the caret, the group's primary, takes the Replace text
-                // tool's style as the strikeout does, so a default saved from either part (Make
-                // Current Properties Default) applies to the next proposal as a whole.
                 caret: prefs.style(CommentTool::ReplaceText),
             })
         }
@@ -235,7 +234,15 @@ pub(crate) fn composer(ctx: &egui::Context, keys: PageKeys, view: &mut DocView, 
             view.comments.tool_done = true;
             let [x, y] = c.at;
             let half = size / 2.0;
-            Some(new_comment_styled(&cx, CommentTool::Caret, Shape::Caret { rect: [x - half, y - size, x + half, y] }, text, bold, italic))
+            Some(new_comment_styled(
+                &cx,
+                CommentTool::Caret,
+                Shape::Caret { rect: [x - half, y - size, x + half, y] },
+                text,
+                all_bold,
+                all_italic,
+                rc,
+            ))
         }
     }
 }
@@ -763,4 +770,245 @@ pub(crate) fn format_comment_galley_styled(
         job.append(&run, 0.0, egui::TextFormat { font_id, color, italics: st.italic, underline, ..Default::default() });
     }
     ui.painter().layout_job(job)
+}
+
+/// Convert comment text and character styles into PDF-compliant rich text XML (`/RC`).
+pub(crate) fn styles_to_rc(text: &str, styles: &[CharStyle], default_bold: bool, default_italic: bool) -> String {
+    let mut out = String::from(
+        "<?xml version=\"1.0\"?><body xmlns=\"http://www.w3.org/1999/xhtml\" xmlns:xfa=\"http://www.xfa.org/schema/xfa-data/1.0/\" xfa:spec=\"2.0.2\" style=\"font-size:12pt;text-align:left;color:#000000;font-weight:normal;font-style:normal;font-family:Helvetica;font-stretch:normal\">",
+    );
+    let esc = |s: &str| s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;").replace('"', "&quot;");
+    let mut char_idx = 0;
+    for line in text.split('\n') {
+        let line_chars: Vec<char> = line.chars().collect();
+        out.push_str("<p dir=\"ltr\">");
+        let mut i = 0;
+        while i < line_chars.len() {
+            let st =
+                styles.get(char_idx + i).copied().unwrap_or(CharStyle { bold: default_bold, italic: default_italic, underline: false, color: None });
+            let mut span_text = String::new();
+            while i < line_chars.len() {
+                let next_st = styles.get(char_idx + i).copied().unwrap_or(CharStyle {
+                    bold: default_bold,
+                    italic: default_italic,
+                    underline: false,
+                    color: None,
+                });
+                if next_st != st {
+                    break;
+                }
+                span_text.push(line_chars[i]);
+                i += 1;
+            }
+            let is_plain = !st.bold && !st.italic && !st.underline && st.color.is_none();
+            let escaped = esc(&span_text);
+            if is_plain {
+                out.push_str(&escaped);
+            } else {
+                out.push_str("<span style=\"");
+                if st.bold {
+                    out.push_str("font-weight:bold;");
+                }
+                if st.italic {
+                    out.push_str("font-style:italic;");
+                }
+                if st.underline {
+                    out.push_str("text-decoration:underline;");
+                }
+                if let Some(c) = st.color {
+                    out.push_str(&format!("color:#{:02X}{:02X}{:02X};", c.r(), c.g(), c.b()));
+                }
+                out.push_str("\">");
+                out.push_str(&escaped);
+                out.push_str("</span>");
+            }
+        }
+        out.push_str("</p>");
+        char_idx += line_chars.len() + 1;
+    }
+    out.push_str("</body>");
+    out
+}
+
+/// Parse `/RC` XML rich text into per-character styles mapped to `text`.
+pub(crate) fn rc_to_char_styles(rc: &str, text: &str) -> (Vec<CharStyle>, bool, bool) {
+    let count = text.chars().count();
+    if rc.trim().is_empty() {
+        return (vec![CharStyle { bold: false, italic: false, underline: false, color: None }; count], false, false);
+    }
+    let mut default_style = CharStyle { bold: false, italic: false, underline: false, color: None };
+    if let Some(body_start) = rc.find("<body")
+        && let Some(tag_end) = rc[body_start..].find('>')
+    {
+        let body_tag = &rc[body_start..body_start + tag_end];
+        if body_tag.contains("font-weight:bold") || body_tag.contains("font-weight: bold") || body_tag.contains("font-weight:700") {
+            default_style.bold = true;
+        }
+        if body_tag.contains("font-style:italic") || body_tag.contains("font-style: italic") {
+            default_style.italic = true;
+        }
+    }
+    let mut style_stack = vec![default_style];
+    let mut current_style = default_style;
+    let mut parsed_chars = Vec::new();
+    let mut parsed_styles = Vec::new();
+
+    let mut rest = rc;
+    while !rest.is_empty() {
+        if let Some(tag_start) = rest.find('<') {
+            let text_before = &rest[..tag_start];
+            decode_xml_into(text_before, current_style, &mut parsed_chars, &mut parsed_styles);
+            rest = &rest[tag_start..];
+            if let Some(tag_end) = rest.find('>') {
+                let tag = &rest[1..tag_end];
+                rest = &rest[tag_end + 1..];
+                if let Some(close_tag) = tag.strip_prefix('/') {
+                    let name = close_tag.trim().split_whitespace().next().unwrap_or_default().to_ascii_lowercase();
+                    if matches!(name.as_str(), "span" | "b" | "strong" | "i" | "em" | "u" | "p" | "body") {
+                        current_style = style_stack.pop().unwrap_or(default_style);
+                    }
+                } else {
+                    let name = tag.split_whitespace().next().unwrap_or_default().to_ascii_lowercase();
+                    let name = name.trim_end_matches('/');
+                    style_stack.push(current_style);
+                    if matches!(name, "b" | "strong") {
+                        current_style.bold = true;
+                    } else if matches!(name, "i" | "em") {
+                        current_style.italic = true;
+                    } else if name == "u" {
+                        current_style.underline = true;
+                    } else if matches!(name, "span" | "p" | "body")
+                        && let Some(style_attr) = parse_style_attr(tag)
+                    {
+                        if style_attr.contains("font-weight:bold")
+                            || style_attr.contains("font-weight: bold")
+                            || style_attr.contains("font-weight:700")
+                        {
+                            current_style.bold = true;
+                        } else if style_attr.contains("font-weight:normal") || style_attr.contains("font-weight: normal") {
+                            current_style.bold = false;
+                        }
+                        if style_attr.contains("font-style:italic") || style_attr.contains("font-style: italic") {
+                            current_style.italic = true;
+                        } else if style_attr.contains("font-style:normal") || style_attr.contains("font-style: normal") {
+                            current_style.italic = false;
+                        }
+                        if style_attr.contains("text-decoration:underline") || style_attr.contains("text-decoration: underline") {
+                            current_style.underline = true;
+                        }
+                        if let Some(color) = parse_css_color(style_attr) {
+                            current_style.color = Some(color);
+                        }
+                    }
+                }
+            } else {
+                break;
+            }
+        } else {
+            decode_xml_into(rest, current_style, &mut parsed_chars, &mut parsed_styles);
+            break;
+        }
+    }
+
+    let mut out_styles = Vec::with_capacity(count);
+    let target_chars: Vec<char> = text.chars().collect();
+    let mut p_idx = 0;
+    for &ch in &target_chars {
+        if ch == '\n' || ch == '\r' {
+            out_styles.push(default_style);
+            continue;
+        }
+        while p_idx < parsed_chars.len() && parsed_chars[p_idx].is_whitespace() && ch != parsed_chars[p_idx] {
+            p_idx += 1;
+        }
+        if p_idx < parsed_chars.len() {
+            out_styles.push(parsed_styles[p_idx]);
+            p_idx += 1;
+        } else {
+            out_styles.push(default_style);
+        }
+    }
+    while out_styles.len() < count {
+        out_styles.push(default_style);
+    }
+    let all_bold = !out_styles.is_empty() && out_styles.iter().all(|s| s.bold);
+    let all_italic = !out_styles.is_empty() && out_styles.iter().all(|s| s.italic);
+    (out_styles, all_bold, all_italic)
+}
+
+fn parse_style_attr(tag: &str) -> Option<&str> {
+    let lower = tag.to_ascii_lowercase();
+    let idx = lower.find("style=")?;
+    let rem = &tag[idx + 6..];
+    let quote = rem.chars().next()?;
+    if quote == '"' || quote == '\'' {
+        let content = &rem[1..];
+        let end = content.find(quote)?;
+        Some(&content[..end])
+    } else {
+        None
+    }
+}
+
+fn parse_css_color(style: &str) -> Option<Color32> {
+    if let Some(idx) = style.find("color:#") {
+        let hex = &style[idx + 7..];
+        let hex = hex.split(|c: char| !c.is_ascii_hexdigit()).next()?;
+        if hex.len() >= 6 {
+            let r = u8::from_str_radix(hex.get(0..2)?, 16).ok()?;
+            let g = u8::from_str_radix(hex.get(2..4)?, 16).ok()?;
+            let b = u8::from_str_radix(hex.get(4..6)?, 16).ok()?;
+            return Some(Color32::from_rgb(r, g, b));
+        }
+    }
+    None
+}
+
+fn decode_xml_into(s: &str, style: CharStyle, chars: &mut Vec<char>, styles: &mut Vec<CharStyle>) {
+    let mut rest = s;
+    while !rest.is_empty() {
+        if let Some(amp) = rest.find('&') {
+            for ch in rest.get(..amp).unwrap_or_default().chars() {
+                chars.push(ch);
+                styles.push(style);
+            }
+            rest = rest.get(amp..).unwrap_or_default();
+            if let Some(semi) = rest.find(';') {
+                let ent = rest.get(1..semi).unwrap_or_default();
+                let decoded = match ent {
+                    "amp" => Some('&'),
+                    "lt" => Some('<'),
+                    "gt" => Some('>'),
+                    "quot" => Some('"'),
+                    "apos" => Some('\''),
+                    _ if ent.starts_with('#') => {
+                        let num = ent.get(1..).unwrap_or_default();
+                        if let Some(hex) = num.strip_prefix('x').or_else(|| num.strip_prefix('X')) {
+                            u32::from_str_radix(hex, 16).ok().and_then(char::from_u32)
+                        } else {
+                            num.parse::<u32>().ok().and_then(char::from_u32)
+                        }
+                    }
+                    _ => None,
+                };
+                if let Some(c) = decoded {
+                    chars.push(c);
+                    styles.push(style);
+                }
+                rest = rest.get(semi + 1..).unwrap_or_default();
+            } else {
+                for ch in rest.chars() {
+                    chars.push(ch);
+                    styles.push(style);
+                }
+                break;
+            }
+        } else {
+            for ch in rest.chars() {
+                chars.push(ch);
+                styles.push(style);
+            }
+            break;
+        }
+    }
 }

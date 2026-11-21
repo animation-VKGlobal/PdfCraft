@@ -541,6 +541,12 @@ pub fn add_annotation(doc: &mut Document, new: &NewAnnotation, meta: &Meta) -> R
 }
 
 fn apply_styled_text_properties(d: &mut Dict, style: &Style, contents: &str) {
+    if let Some(rc) = &style.rc {
+        d.set(b"RC".to_vec(), PdfString::text(rc));
+        let keywords = format!("{}{}", if style.italic { "italic " } else { "" }, if style.bold { "bold " } else { "" });
+        d.set(b"DS".to_vec(), PdfString::text(&format!("font: {keywords}Helvetica 12pt; text-align:left;")));
+        return;
+    }
     if !style.bold && !style.italic {
         return;
     }

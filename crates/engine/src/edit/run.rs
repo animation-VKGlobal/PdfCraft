@@ -686,9 +686,11 @@ pub(crate) fn run_edit(doc: &mut pdfcraft_cos::Document, edit: &Edit, cx: &mut E
             pdfcraft_annot::add_3d_model(doc, &new, &cx.meta())?;
         }
         Edit::DeleteAnnotation { page, index } => pdfcraft_annot::delete_annotation(doc, *page, *index)?,
-        Edit::SetAnnotationContents { page, index, text } => pdfcraft_annot::set_contents(doc, *page, *index, text, &cx.meta())?,
-        Edit::ReplyToAnnotation { page, index, text, author } => {
-            pdfcraft_annot::add_reply(doc, *page, *index, text, author, &cx.meta())?;
+        Edit::SetAnnotationContents { page, index, text, rc } => {
+            pdfcraft_annot::set_contents_rich(doc, *page, *index, text, rc.as_deref(), &cx.meta())?
+        }
+        Edit::ReplyToAnnotation { page, index, text, author, rc } => {
+            pdfcraft_annot::add_reply_rich(doc, *page, *index, text, author, rc.as_deref(), &cx.meta())?;
         }
         Edit::SetAnnotationStatus { page, index, state, author } => {
             pdfcraft_annot::set_review_state(doc, *page, *index, *state, author, &cx.meta())?;

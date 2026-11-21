@@ -347,6 +347,7 @@ impl<'a> Inspector<'a> {
                 popup,
                 bold,
                 italic,
+                rc,
             };
             kept = kept.saturating_add(retained(&annotation).max(raw));
             if kept > MAX_ANNOTATION_BYTES {

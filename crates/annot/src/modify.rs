@@ -298,6 +298,11 @@ pub fn with_replies_and_popups(doc: &Document, list: &[Object], doomed: impl Int
 /// new text: the wrap width and top edge stay, the height fits the wrapped lines. A circle snug
 /// around its text stays snug around the new text, centred where it was.
 pub fn set_contents(doc: &mut Document, page: usize, index: usize, text: &str, meta: &Meta) -> Result<(), AnnotError> {
+    set_contents_rich(doc, page, index, text, None, meta)
+}
+
+/// [`set_contents`] with optional rich text (`/RC`).
+pub fn set_contents_rich(doc: &mut Document, page: usize, index: usize, text: &str, rc: Option<&str>, meta: &Meta) -> Result<(), AnnotError> {
     let (_, r) = annot_ref(doc, page, index)?;
     let before = annot_dict(doc, r);
     let free_text = before.name(b"Subtype") == Some(b"FreeText");
@@ -307,8 +312,9 @@ pub fn set_contents(doc: &mut Document, page: usize, index: usize, text: &str, m
     let style = text_style::text_style(&before, text_style::dr_face(doc, &before));
     doc.update_dict(r, |d| {
         d.set(b"Contents".to_vec(), PdfString::text(text));
-        // The rich-text version follows the new plain text (text boxes), or would contradict it.
-        if free_text {
+        if let Some(rc_str) = rc {
+            d.set(b"RC".to_vec(), PdfString::text(rc_str));
+        } else if free_text {
             rich_text_in(d, style);
         } else {
             d.remove(b"RC");
@@ -375,7 +381,20 @@ fn fitted_box(doc: &Document, r: ObjRef, text: &str) -> Option<[f64; 4]> {
 /// parent's rectangle and an empty appearance, so it shows in comment lists but never paints a
 /// second icon on the page.
 pub fn add_reply(doc: &mut Document, page: usize, index: usize, text: &str, author: &str, meta: &Meta) -> Result<usize, AnnotError> {
-    reply(doc, page, index, text, author, meta, None)
+    reply(doc, page, index, text, author, meta, None, None)
+}
+
+/// [`add_reply`] with optional rich text (`/RC`).
+pub fn add_reply_rich(
+    doc: &mut Document,
+    page: usize,
+    index: usize,
+    text: &str,
+    author: &str,
+    rc: Option<&str>,
+    meta: &Meta,
+) -> Result<usize, AnnotError> {
+    reply(doc, page, index, text, author, meta, None, rc)
 }
 
 /// Set a comment's review status ("Set status ▸ Accepted"…). This adds a hidden state reply
@@ -383,7 +402,7 @@ pub fn add_reply(doc: &mut Document, page: usize, index: usize, text: &str, auth
 /// one; each reviewer's latest is their status.
 pub fn set_review_state(doc: &mut Document, page: usize, index: usize, state: ReviewState, author: &str, meta: &Meta) -> Result<usize, AnnotError> {
     let text = format!("{} set by {}", state.name(), if author.is_empty() { "unknown" } else { author });
-    reply(doc, page, index, &text, author, meta, Some(state))
+    reply(doc, page, index, &text, author, meta, Some(state), None)
 }
 
 fn reply(
@@ -394,6 +413,7 @@ fn reply(
     author: &str,
     meta: &Meta,
     state: Option<ReviewState>,
+    rc: Option<&str>,
 ) -> Result<usize, AnnotError> {
     let (p, parent) = annot_ref(doc, page, index)?;
     let pd = annot_dict(doc, parent);
@@ -408,6 +428,9 @@ fn reply(
     d.set(b"Name".to_vec(), Object::name("Comment"));
     if let Some(c) = pd.get(b"C") {
         d.set(b"C".to_vec(), c.clone());
+    }
+    if let Some(rc_str) = rc {
+        d.set(b"RC".to_vec(), PdfString::text(rc_str));
     }
     if let Some(s) = state {
         d.set(b"State".to_vec(), PdfString::text(s.name()));

@@ -203,12 +203,14 @@ pub enum Edit {
         page: usize,
         index: usize,
         text: String,
+        rc: Option<String>,
     },
     ReplyToAnnotation {
         page: usize,
         index: usize,
         text: String,
         author: String,
+        rc: Option<String>,
     },
     /// Acrobat's "Set status" (a state reply by `author`).
     SetAnnotationStatus {

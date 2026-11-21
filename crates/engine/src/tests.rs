@@ -2777,7 +2777,7 @@ fn comments_are_added_drawn_threaded_and_undone() {
     let nm = a[0].name.clone().expect("has an /NM");
     assert_eq!(nm.len(), 36);
 
-    s.apply(id, Edit::ReplyToAnnotation { page: 1, index: 0, text: "Done".into(), author: "Ada".into() }).unwrap();
+    s.apply(id, Edit::ReplyToAnnotation { page: 1, index: 0, text: "Done".into(), author: "Ada".into(), rc: None }).unwrap();
     s.apply(id, Edit::SetAnnotationStatus { page: 1, index: 0, state: ReviewState::Completed, author: "Ada".into() }).unwrap();
     let a = &s.get(id).unwrap().info.annotations;
     assert_eq!(a.len(), 3);
@@ -3534,7 +3534,7 @@ fn comment_edits_refresh_the_list_exactly_as_a_full_inspection_would() {
         .unwrap();
     s.apply(id, add(1, Shape::TextBox { rect: [10.0, 200.0, 150.0, 240.0], font_size: 11.0 }, "Text box")).unwrap();
     s.apply(id, add(2, Shape::Note { at: [100.0, 280.0], icon: NoteIcon::Comment }, "Sticky")).unwrap();
-    s.apply(id, Edit::ReplyToAnnotation { page: 2, index: 0, text: "Reply".into(), author: "Bob".into() }).unwrap();
+    s.apply(id, Edit::ReplyToAnnotation { page: 2, index: 0, text: "Reply".into(), author: "Bob".into(), rc: None }).unwrap();
     s.apply(id, Edit::SetAnnotationStatus { page: 2, index: 0, state: ReviewState::Accepted, author: "Bob".into() }).unwrap();
     s.apply(id, Edit::MarkAnnotation { page: 2, index: 0, marked: true, author: "Bob".into() }).unwrap();
     s.apply(id, Edit::LockAnnotation { page: 1, index: 1, locked: true }).unwrap();
@@ -3971,7 +3971,7 @@ fn mark_with_reply(s: &mut Session, id: DocId) {
         author: "Mark Author".into(),
     });
     s.apply(id, mark).unwrap();
-    let reply = Edit::ReplyToAnnotation { page: 0, index: 0, text: "REPLY TO THE MARK".into(), author: "Replier".into() };
+    let reply = Edit::ReplyToAnnotation { page: 0, index: 0, text: "REPLY TO THE MARK".into(), author: "Replier".into(), rc: None };
     s.apply(id, reply).unwrap();
 }
 
@@ -4857,7 +4857,7 @@ fn comment_text(s: &Session, id: DocId) -> Vec<String> {
 fn a_stamp_with_a_locked_reply_still_has_its_drag_layers() {
     let (mut s, id) = session_with(1);
     s.apply(id, fill_item(Shape::Mark { rect: [30.0, 60.0, 130.0, 66.0], mark: FillMark::Line }, "")).unwrap();
-    s.apply(id, Edit::ReplyToAnnotation { page: 0, index: 0, text: "Approved".into(), author: "Bob".into() }).unwrap();
+    s.apply(id, Edit::ReplyToAnnotation { page: 0, index: 0, text: "Approved".into(), author: "Bob".into(), rc: None }).unwrap();
     let reply = s.get(id).unwrap().info.annotations.iter().find(|a| a.parent == Some((0, 0))).expect("the reply").index;
     s.apply(id, Edit::LockAnnotation { page: 0, index: reply, locked: true }).unwrap();
     let doc = s.get(id).unwrap();
@@ -5582,13 +5582,13 @@ fn appearance_only_edit_preserves_gotor_action_semantics() {
 fn comments_lock_take_checkmarks_hide_and_summarize() {
     let (mut s, id) = session_with(2);
     s.apply(id, rect_comment(1, [80.0, 80.0, 120.0, 120.0])).unwrap();
-    s.apply(id, Edit::ReplyToAnnotation { page: 1, index: 0, text: "Agreed".into(), author: "Ada".into() }).unwrap();
+    s.apply(id, Edit::ReplyToAnnotation { page: 1, index: 0, text: "Agreed".into(), author: "Ada".into(), rc: None }).unwrap();
     s.apply(id, Edit::LockAnnotation { page: 1, index: 0, locked: true }).unwrap();
     assert_eq!(s.get(id).unwrap().can_undo(), Some("Lock comment"));
     assert!(s.get(id).unwrap().info.annotations[0].locked);
     assert!(s.apply(id, Edit::MoveAnnotation { page: 1, index: 0, dx: 5.0, dy: 0.0 }).is_err(), "locked comments stay put");
     assert!(s.apply(id, Edit::DeleteAnnotation { page: 1, index: 0 }).is_err(), "and can't be deleted");
-    s.apply(id, Edit::SetAnnotationContents { page: 1, index: 0, text: "Still editable".into() }).unwrap();
+    s.apply(id, Edit::SetAnnotationContents { page: 1, index: 0, text: "Still editable".into(), rc: None }).unwrap();
     s.apply(id, Edit::LockAnnotation { page: 1, index: 0, locked: false }).unwrap();
     s.apply(id, Edit::MoveAnnotation { page: 1, index: 0, dx: 5.0, dy: 0.0 }).unwrap();
 
@@ -5654,7 +5654,7 @@ trailer << /Root 1 0 R >>
         assert_eq!(second.matches("    Author:").count(), replies, "{text}");
     };
     check(&s, 1);
-    s.apply(id, Edit::ReplyToAnnotation { page: 1, index: 0, text: "LATER".into(), author: "Delta".into() }).unwrap();
+    s.apply(id, Edit::ReplyToAnnotation { page: 1, index: 0, text: "LATER".into(), author: "Delta".into(), rc: None }).unwrap();
     check(&s, 2);
 }
 
@@ -5685,7 +5685,7 @@ trailer << /Root 1 0 R >>
         }
     };
     check(&s);
-    s.apply(id, Edit::ReplyToAnnotation { page: 0, index: 3, text: "LATER".into(), author: "Delta".into() }).unwrap();
+    s.apply(id, Edit::ReplyToAnnotation { page: 0, index: 3, text: "LATER".into(), author: "Delta".into(), rc: None }).unwrap();
     check(&s);
 }
 
@@ -5694,8 +5694,8 @@ trailer << /Root 1 0 R >>
 fn comment_summary_includes_replies_to_replies() {
     let (mut s, id) = session_with(1);
     s.apply(id, rect_comment(0, [40.0, 40.0, 90.0, 90.0])).unwrap();
-    s.apply(id, Edit::ReplyToAnnotation { page: 0, index: 0, text: "FIRST_REPLY".into(), author: "A".into() }).unwrap();
-    s.apply(id, Edit::ReplyToAnnotation { page: 0, index: 1, text: "NESTED_REPLY".into(), author: "B".into() }).unwrap();
+    s.apply(id, Edit::ReplyToAnnotation { page: 0, index: 0, text: "FIRST_REPLY".into(), author: "A".into(), rc: None }).unwrap();
+    s.apply(id, Edit::ReplyToAnnotation { page: 0, index: 1, text: "NESTED_REPLY".into(), author: "B".into(), rc: None }).unwrap();
     let text = comment_summary("doc.pdf", &s.get(id).unwrap().info.annotations, SummarySort::Page);
     assert!(text.contains("FIRST_REPLY"), "{text}");
     assert!(text.contains("NESTED_REPLY"), "replies to replies are summarized: {text}");
@@ -5708,8 +5708,8 @@ fn comment_summary_includes_replies_to_replies() {
 fn comment_summary_leaves_group_members_out_and_keeps_their_replies() {
     let (mut s, id) = session_with(1);
     s.apply(id, rect_comment(0, [40.0, 40.0, 90.0, 90.0])).unwrap();
-    s.apply(id, Edit::ReplyToAnnotation { page: 0, index: 0, text: "MEMBER_TEXT".into(), author: "Bob".into() }).unwrap();
-    s.apply(id, Edit::ReplyToAnnotation { page: 0, index: 1, text: "REPLY_TO_MEMBER".into(), author: "Carol".into() }).unwrap();
+    s.apply(id, Edit::ReplyToAnnotation { page: 0, index: 0, text: "MEMBER_TEXT".into(), author: "Bob".into(), rc: None }).unwrap();
+    s.apply(id, Edit::ReplyToAnnotation { page: 0, index: 1, text: "REPLY_TO_MEMBER".into(), author: "Carol".into(), rc: None }).unwrap();
     let mut all = s.get(id).unwrap().info.annotations.clone();
     all.iter_mut().find(|a| a.contents.as_deref() == Some("MEMBER_TEXT")).unwrap().grouped = true;
     let text = comment_summary("doc.pdf", &all, SummarySort::Page);
@@ -13602,7 +13602,7 @@ fn need_appearances_buttons_are_displayed_from_their_captions() {
 fn pasting_copied_comments_adds_copies_that_undo_as_one_step() {
     let (mut s, id) = session_with(2);
     s.apply(id, rect_comment(1, [80.0, 80.0, 120.0, 120.0])).unwrap();
-    s.apply(id, Edit::ReplyToAnnotation { page: 1, index: 0, text: "Done".into(), author: "Ada".into() }).unwrap();
+    s.apply(id, Edit::ReplyToAnnotation { page: 1, index: 0, text: "Done".into(), author: "Ada".into(), rc: None }).unwrap();
     let xfdf = s.export_comments(id, &[(1, 0)]).unwrap();
     assert!(xfdf.contains("<square") && xfdf.contains("inreplyto="), "{xfdf}");
     let other = s.open("other.pdf", None, Arc::new(fixture(2)), None).expect("opens");

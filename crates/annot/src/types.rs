@@ -606,6 +606,8 @@ pub struct Style {
     pub bold: bool,
     /// Italic text formatting.
     pub italic: bool,
+    /// Rich text XHTML XML string (`/RC`).
+    pub rc: Option<String>,
 }
 
 /// The style properties changed by one annotation edit. `None` leaves a property unchanged.
@@ -648,6 +650,7 @@ impl Default for Style {
             border_shape: BorderShape::Rectangle,
             bold: false,
             italic: false,
+            rc: None,
         }
     }
 }

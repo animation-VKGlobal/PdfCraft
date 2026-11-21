@@ -90,6 +90,7 @@ fn an_upright_note_on_a_turned_page_is_in_view_where_it_is_drawn() {
         popup: None,
         bold: false,
         italic: false,
+        rc: None,
     };
     let page = PageInfo { width: 140.0, height: 200.0, label: String::new(), crop: [0.0, 0.0, 200.0, 140.0], rotation: 90 };
     let xf = PageXform { rect: Rect::from_min_size(Pos2::ZERO, vec2(140.0, 200.0)), rot: 0, pw: 140.0, ph: 200.0 };
@@ -140,6 +141,7 @@ fn listed(page: usize, index: usize, contents: &str, parent: Option<(usize, usiz
         popup: None,
         bold: false,
         italic: false,
+        rc: None,
     }
 }
 
@@ -239,6 +241,7 @@ fn annotation(subtype: &str, contents: Option<&str>, fill_sign: bool) -> Annotat
         popup: None,
         bold: false,
         italic: false,
+        rc: None,
     }
 }
 
@@ -448,6 +451,7 @@ fn context_menu_colour_submenu_keeps_its_picker_open_and_a_swatch_closes_the_men
             no_rotate: false,
             bold: false,
             italic: false,
+            rc: None,
         }],
         ..Default::default()
     };
@@ -651,6 +655,7 @@ fn markup_comment_markers_stay_inside_turned_and_zoomed_pages() {
                     popup: None,
                     bold: false,
                     italic: false,
+                    rc: None,
                 };
                 let marker = cx.comment_marker_rect(&a).expect("commented markup has a marker");
                 assert!((marker.width() - 12.0).abs() < 0.001 && (marker.height() - 12.0).abs() < 0.001, "{marker:?}");
@@ -698,6 +703,7 @@ fn stale_comment_state_is_cleared_and_delete_never_hits_non_comment_slots() {
         popup: None,
         bold: false,
         italic: false,
+        rc: None,
     };
     // Page 0 has a Widget at index 0 (not in `info.annotations`), and Text comments at 1 and 2.
     let info = DocInfo {
@@ -784,6 +790,7 @@ fn an_unnamed_shift_clears_state_for_the_old_index() {
         popup: None,
         bold: false,
         italic: false,
+        rc: None,
     };
     let info = DocInfo {
         pages: vec![
@@ -836,6 +843,7 @@ fn a_replace_text_group_makes_replace_text_defaults() {
         popup: None,
         bold: false,
         italic: false,
+        rc: None,
     };
     let all =
         vec![annot(0, "Caret", Some("Replace"), None), annot(1, "StrikeOut", Some("StrikeOutTextEdit"), Some((0, 0))), annot(2, "Caret", None, None)];
@@ -1035,4 +1043,35 @@ fn comment_char_styles_selection_and_toggles() {
         assert_eq!(g.text(), "Hello World");
     })
     .drop_without_applying_deltas();
+}
+
+#[test]
+fn comment_rich_text_rc_round_trip() {
+    use super::composer::{rc_to_char_styles, styles_to_rc, sync_char_styles, toggle_bold_range, toggle_italic_range};
+
+    let text = "add new image";
+    let mut styles = Vec::new();
+    sync_char_styles(text, &mut styles, false, false);
+
+    // "add new" (0..7) is bold
+    let mut default_bold = false;
+    toggle_bold_range(&mut styles, Some((0, 7)), &mut default_bold);
+
+    // "image" (8..13) is italic
+    let mut default_italic = false;
+    toggle_italic_range(&mut styles, Some((8, 13)), &mut default_italic);
+
+    // Convert to /RC XML
+    let rc = styles_to_rc(text, &styles, false, false);
+    assert!(rc.contains("font-weight:bold;"));
+    assert!(rc.contains("font-style:italic;"));
+
+    // Parse back from /RC XML
+    let (parsed_styles, all_bold, all_italic) = rc_to_char_styles(&rc, text);
+    assert!(!all_bold, "not all text is bold");
+    assert!(!all_italic, "not all text is italic");
+    assert_eq!(parsed_styles.len(), 13);
+    assert!(parsed_styles[0..7].iter().all(|s| s.bold && !s.italic), "add new is bold");
+    assert!(!parsed_styles[7].bold && !parsed_styles[7].italic, "space is unstyled");
+    assert!(parsed_styles[8..13].iter().all(|s| !s.bold && s.italic), "image is italic");
 }

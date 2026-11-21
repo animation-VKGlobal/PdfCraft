@@ -474,6 +474,7 @@ fn no_rotate_comments_are_shown_upright_from_their_corner_and_back() {
         popup: None,
         bold: false,
         italic: false,
+        rc: None,
     };
     let rect = note.rect.map(f64::from);
     for rotation in [0u16, 90, 180, 270, 45] {
@@ -2540,6 +2541,7 @@ mod group_tests {
             popup: None,
             bold: false,
             italic: false,
+            rc: None,
         }
     }
 

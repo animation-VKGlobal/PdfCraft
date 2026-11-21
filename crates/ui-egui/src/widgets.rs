@@ -443,6 +443,59 @@ pub fn wrapped_text(ui: &mut egui::Ui, text: &str, font: egui::FontId, color: Co
     wrapped_text_styled(ui, text, font, color, truncate, false, false)
 }
 
+/// Render wrapped text in label with per-character styling (bold, italic, underline, color).
+pub fn wrapped_text_char_styled(
+    ui: &mut egui::Ui,
+    text: &str,
+    font_size: f32,
+    text_color: Color32,
+    truncate: bool,
+    styles: &[crate::tools::comments::CharStyle],
+    fallback: (bool, bool),
+) -> Response {
+    if text.is_empty() {
+        return ui.label("");
+    }
+    let mut job = egui::text::LayoutJob::default();
+    job.wrap.max_width = ui.available_width();
+    if truncate {
+        job.wrap.max_rows = 1;
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        let st = styles.get(i).copied().unwrap_or(crate::tools::comments::CharStyle {
+            bold: fallback.0,
+            italic: fallback.1,
+            underline: false,
+            color: None,
+        });
+        let mut run = String::new();
+        while i < chars.len() {
+            let next_st = styles.get(i).copied().unwrap_or(crate::tools::comments::CharStyle {
+                bold: fallback.0,
+                italic: fallback.1,
+                underline: false,
+                color: None,
+            });
+            if next_st != st {
+                break;
+            }
+            run.push(chars[i]);
+            i += 1;
+        }
+        let font_id = if st.bold { theme::semibold(font_size) } else { theme::regular(font_size) };
+        let color = st.color.unwrap_or(text_color);
+        let underline = if st.underline { egui::Stroke::new(1.0, color) } else { egui::Stroke::NONE };
+        job.append(&run, 0.0, egui::TextFormat { font_id, color, italics: st.italic, underline, ..Default::default() });
+    }
+    let mut label = egui::Label::new(job).wrap();
+    if truncate {
+        label = label.truncate();
+    }
+    ui.add(label)
+}
+
 /// Like [`wrapped_text`], but with explicit bold and italic styling.
 pub fn wrapped_text_styled(ui: &mut egui::Ui, text: &str, font: egui::FontId, color: Color32, truncate: bool, bold: bool, italic: bool) -> Response {
     let font_id = if bold { theme::semibold(font.size) } else { font };

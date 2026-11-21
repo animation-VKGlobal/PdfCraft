@@ -47,6 +47,7 @@ pub struct Summary {
     pub popup: Option<PopupInfo>,
     pub bold: bool,
     pub italic: bool,
+    pub rc: Option<String>,
 }
 
 impl Summary {
@@ -271,6 +272,7 @@ pub fn summaries(doc: &Document) -> Vec<Summary> {
                 popup: popup_info(doc, entry.as_ref().map(|r| final_ref(doc, r)), d),
                 bold,
                 italic,
+                rc,
             });
         }
     }

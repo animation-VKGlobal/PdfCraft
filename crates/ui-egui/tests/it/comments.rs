@@ -2274,7 +2274,7 @@ fn comments_take_checkmarks_lock_hide_and_summarize() {
     h.get_by_label("Remove checkmark");
 
     // "…" ▸ Copy text puts the comment's text on the clipboard.
-    h.state_mut().apply_edit(pdfcraft_engine::Edit::SetAnnotationContents { page: 0, index: 0, text: "Copy me".into() });
+    h.state_mut().apply_edit(pdfcraft_engine::Edit::SetAnnotationContents { page: 0, index: 0, text: "Copy me".into(), rc: None });
     h.run_steps(2);
     h.get_by_label("More").click();
     h.run_steps(2);
@@ -4479,7 +4479,7 @@ fn a_pop_ups_unsaved_work_follows_its_comment_or_is_dropped() {
     h.state_mut().views[0].comments.popup_reply = Some((third.0, third.1, "draft".into()));
 
     // Another edit, on another comment: the draft stays.
-    assert!(h.state_mut().apply_edit(Edit::SetAnnotationContents { page: second.0, index: second.1, text: "Second!".into() }));
+    assert!(h.state_mut().apply_edit(Edit::SetAnnotationContents { page: second.0, index: second.1, text: "Second!".into(), rc: None }));
     h.run_steps(2);
     assert_eq!(h.state().views[0].comments.popup_reply, Some((third.0, third.1, "draft".into())));
 
@@ -4594,7 +4594,7 @@ fn a_card_out_of_view_that_grows_moves_the_cards_below_it() {
     assert!(h.query_by_label("Card 1").is_none(), "card 1 is out of view");
     let before = h.get_by_label("Card 61").rect().top();
     for text in ["A first reply", "A second reply"] {
-        h.state_mut().apply_edit(pdfcraft_engine::Edit::ReplyToAnnotation { page: 0, index: 0, text: text.into(), author: "Bo".into() });
+        h.state_mut().apply_edit(pdfcraft_engine::Edit::ReplyToAnnotation { page: 0, index: 0, text: text.into(), author: "Bo".into(), rc: None });
     }
     h.run_steps(4);
     let after = h.get_by_label("Card 61").rect().top();
@@ -5188,7 +5188,13 @@ fn add_two_boxes_and_a_reply(h: &mut Harness<'static, PdfCraftApp>) {
             author: "Tester".into(),
         })));
     }
-    assert!(h.state_mut().apply_edit(pdfcraft_engine::Edit::ReplyToAnnotation { page: 0, index: 0, text: "Reply".into(), author: "Tester".into() }));
+    assert!(h.state_mut().apply_edit(pdfcraft_engine::Edit::ReplyToAnnotation {
+        page: 0,
+        index: 0,
+        text: "Reply".into(),
+        author: "Tester".into(),
+        rc: None
+    }));
     h.run_steps(2);
 }
 

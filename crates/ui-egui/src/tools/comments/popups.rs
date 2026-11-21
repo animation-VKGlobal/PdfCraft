@@ -213,6 +213,12 @@ fn text_box(ui: &mut egui::Ui, parts: &mut Parts<'_>, a: &Annotation, name: &str
         let mut bold = a.bold;
         let mut italic = a.italic;
         let mut styles = parts.cv.popup_styles.get(&key).cloned().unwrap_or_else(|| {
+            if let Some(rc) = a.rc.as_deref() {
+                let (st, _, _) = super::composer::rc_to_char_styles(rc, &text);
+                if st.len() == text.chars().count() {
+                    return st;
+                }
+            }
             let count = text.chars().count();
             vec![super::state::CharStyle { bold, italic, underline: false, color: None }; count]
         });
@@ -262,7 +268,7 @@ fn text_box(ui: &mut egui::Ui, parts: &mut Parts<'_>, a: &Annotation, name: &str
                 parts.cv.popup_undo.remove(&key);
             }
         }
-        parts.cv.popup_styles.insert(key, styles);
+        parts.cv.popup_styles.insert(key, styles.clone());
         if field.changed() {
             parts.cv.popup_text = Some((a.page, a.index, text.clone()));
         }
@@ -270,13 +276,25 @@ fn text_box(ui: &mut egui::Ui, parts: &mut Parts<'_>, a: &Annotation, name: &str
             && let Some((_, _, s)) = parts.cv.popup_text.take_if(|(p, i, _)| (*p, *i) == key)
             && s.trim_end() != a.contents.as_deref().unwrap_or_default()
         {
-            parts.edits.push(Edit::SetAnnotationContents { page: a.page, index: a.index, text: s.trim_end().to_string() });
+            let rc = if styles.iter().any(|st| st.bold || st.italic || st.underline || st.color.is_some()) {
+                Some(super::composer::styles_to_rc(s.trim_end(), &styles, bold, italic))
+            } else {
+                None
+            };
+            parts.edits.push(Edit::SetAnnotationContents { page: a.page, index: a.index, text: s.trim_end().to_string(), rc });
         }
     } else {
         egui::Frame::NONE.fill(Color32::WHITE).inner_margin(egui::Margin::symmetric(4, 2)).show(ui, |ui| {
             ui.set_width(ui.available_width());
             let contents = a.contents.as_deref().unwrap_or_default();
-            crate::widgets::wrapped_text_styled(ui, contents, theme::regular(12.5), parts.pal.ink, false, a.bold, a.italic);
+            let (styles, all_bold, all_italic) = a.rc.as_deref().map(|rc| super::composer::rc_to_char_styles(rc, contents)).unwrap_or_else(|| {
+                (
+                    vec![super::state::CharStyle { bold: a.bold, italic: a.italic, underline: false, color: None }; contents.chars().count()],
+                    a.bold,
+                    a.italic,
+                )
+            });
+            crate::widgets::wrapped_text_char_styled(ui, contents, 12.5, parts.pal.ink, false, &styles, (all_bold, all_italic));
         });
     }
 }
@@ -358,7 +376,7 @@ fn footer(ui: &mut egui::Ui, parts: &mut Parts<'_>, a: &Annotation) {
             parts.cv.popup_undo.remove(&reply_key);
         }
     }
-    parts.cv.popup_styles.insert(reply_key, styles);
+    parts.cv.popup_styles.insert(reply_key, styles.clone());
     if opened {
         field.request_focus();
     }
@@ -379,8 +397,19 @@ fn footer(ui: &mut egui::Ui, parts: &mut Parts<'_>, a: &Annotation) {
         })
         .inner;
     if (post || enter) && ok {
+        let rc = if styles.iter().any(|st| st.bold || st.italic || st.underline || st.color.is_some()) {
+            Some(super::composer::styles_to_rc(reply.trim(), &styles, bold, italic))
+        } else {
+            None
+        };
         parts.cv.popup_reply = None;
-        parts.edits.push(Edit::ReplyToAnnotation { page: a.page, index: a.index, text: reply.trim().to_string(), author: parts.author.to_string() });
+        parts.edits.push(Edit::ReplyToAnnotation {
+            page: a.page,
+            index: a.index,
+            text: reply.trim().to_string(),
+            author: parts.author.to_string(),
+            rc,
+        });
     } else if cancel {
         parts.cv.popup_reply = None;
     }

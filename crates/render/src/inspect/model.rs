@@ -383,6 +383,7 @@ pub struct Annotation {
     pub popup: Option<Popup>,
     pub bold: bool,
     pub italic: bool,
+    pub rc: Option<String>,
 }
 
 /// How far [`group_primaries`] follows `/IRT` from a group subordinate to its primary.
@@ -912,6 +913,7 @@ mod review_state_tests {
                 popup: None,
                 bold: false,
                 italic: false,
+                rc: None,
             })
             .collect();
         link_replies(&mut all);

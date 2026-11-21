@@ -490,7 +490,18 @@ fn card(ui: &mut egui::Ui, view: &mut DocView, context: CardContext<'_>) -> Opti
                         }
                         ui.add(label);
                     } else {
-                        widgets::wrapped_text_styled(ui, body, theme::regular(13.0), t.text, !selected, a.bold, a.italic);
+                        let (styles, all_bold, all_italic) =
+                            a.rc.as_deref().map(|rc| crate::tools::comments::rc_to_char_styles(rc, body)).unwrap_or_else(|| {
+                                (
+                                    vec![
+                                        crate::tools::comments::CharStyle { bold: a.bold, italic: a.italic, underline: false, color: None };
+                                        body.chars().count()
+                                    ],
+                                    a.bold,
+                                    a.italic,
+                                )
+                            });
+                        widgets::wrapped_text_char_styled(ui, body, 13.0, t.text, !selected, &styles, (all_bold, all_italic));
                     }
                 }
                 // One badge per reviewer, with their name: a state is "for the specified user"
@@ -538,15 +549,19 @@ fn card(ui: &mut egui::Ui, view: &mut DocView, context: CardContext<'_>) -> Opti
                                 edit = Some(e);
                             }
                         } else {
-                            widgets::wrapped_text_styled(
-                                ui,
-                                r.contents.as_deref().unwrap_or(""),
-                                theme::regular(12.5),
-                                t.text,
-                                false,
-                                r.bold,
-                                r.italic,
-                            );
+                            let text = r.contents.as_deref().unwrap_or("");
+                            let (styles, all_bold, all_italic) =
+                                r.rc.as_deref().map(|rc| crate::tools::comments::rc_to_char_styles(rc, text)).unwrap_or_else(|| {
+                                    (
+                                        vec![
+                                            crate::tools::comments::CharStyle { bold: r.bold, italic: r.italic, underline: false, color: None };
+                                            text.chars().count()
+                                        ],
+                                        r.bold,
+                                        r.italic,
+                                    )
+                                });
+                            widgets::wrapped_text_char_styled(ui, text, 12.5, t.text, false, &styles, (all_bold, all_italic));
                         }
                     });
                 });
@@ -585,7 +600,7 @@ fn card(ui: &mut egui::Ui, view: &mut DocView, context: CardContext<'_>) -> Opti
                         ui.with_layout(Layout::right_to_left(Align::Min), |ui| ui.add_enabled(ok, egui::Button::new(tl!("Post")).corner_radius(12)));
                     if (post.inner.clicked() || enter) && ok {
                         let text = std::mem::take(&mut view.comments.reply).trim().to_string();
-                        edit = Some(Edit::ReplyToAnnotation { page: a.page, index: a.index, text, author: prefs.author.clone() });
+                        edit = Some(Edit::ReplyToAnnotation { page: a.page, index: a.index, text, author: prefs.author.clone(), rc: None });
                     }
                 });
             }
@@ -718,7 +733,7 @@ fn inline_editor(ui: &mut egui::Ui, t: &Tokens, view: &mut DocView, key: (usize,
         if (ui.add(egui::Button::new(egui::RichText::new(tl!("Save")).color(Color32::WHITE)).fill(t.accent).corner_radius(12)).clicked() || submit)
             && let Some((page, index, text)) = view.comments.editing.take()
         {
-            edit = Some(Edit::SetAnnotationContents { page, index, text });
+            edit = Some(Edit::SetAnnotationContents { page, index, text, rc: None });
         }
         if ui.button(tl!("Cancel")).clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
             view.comments.editing = None;
