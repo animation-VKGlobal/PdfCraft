@@ -290,18 +290,16 @@ pub(crate) fn get_text_selection(ctx: &egui::Context, id: egui::Id) -> Option<(u
 
 /// Select a range of characters in an egui TextEdit.
 pub(crate) fn reselect_range(ctx: &egui::Context, id: egui::Id, start: usize, end: usize) {
-    if let Some(mut state) = egui::TextEdit::load_state(ctx, id) {
-        state.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(start), egui::text::CCursor::new(end))));
-        state.store(ctx, id);
-    }
+    let mut state = egui::TextEdit::load_state(ctx, id).unwrap_or_default();
+    state.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(start), egui::text::CCursor::new(end))));
+    state.store(ctx, id);
 }
 
 /// Move the caret in an egui TextEdit.
 pub(crate) fn reposition_cursor(ctx: &egui::Context, id: egui::Id, pos: usize) {
-    if let Some(mut state) = egui::TextEdit::load_state(ctx, id) {
-        state.cursor.set_char_range(Some(egui::text::CCursorRange::one(egui::text::CCursor::new(pos))));
-        state.store(ctx, id);
-    }
+    let mut state = egui::TextEdit::load_state(ctx, id).unwrap_or_default();
+    state.cursor.set_char_range(Some(egui::text::CCursorRange::one(egui::text::CCursor::new(pos))));
+    state.store(ctx, id);
 }
 
 /// Toggle bold on the selected character range (or all if no selection).
@@ -438,6 +436,8 @@ pub(crate) fn show_comment_text_context_menu(
             reselect_range(ui.ctx(), field_id, start, end);
             selection = Some((start, end));
         }
+    } else if let Some(sel) = selection {
+        ui.data_mut(|d| d.insert_temp(sel_key, sel));
     }
     let has_selection = selection.is_some();
     let can_undo = undo.is_some();
@@ -746,6 +746,21 @@ pub(crate) fn format_comment_galley_styled(
     styles: &[CharStyle],
     fallback: (bool, bool),
 ) -> std::sync::Arc<egui::Galley> {
+    format_comment_galley_styled_with_selection(ui, text, font_size, wrap_width, text_color, styles, fallback, None)
+}
+
+/// Render comment text in TextEdit with per-character visual styling and persistent visual selection highlight.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn format_comment_galley_styled_with_selection(
+    ui: &egui::Ui,
+    text: &str,
+    font_size: f32,
+    wrap_width: f32,
+    text_color: Color32,
+    styles: &[CharStyle],
+    fallback: (bool, bool),
+    selection: Option<(usize, usize)>,
+) -> std::sync::Arc<egui::Galley> {
     let mut job = egui::text::LayoutJob::default();
     job.wrap.max_width = wrap_width;
     if text.is_empty() {
@@ -755,10 +770,12 @@ pub(crate) fn format_comment_galley_styled(
     let mut i = 0;
     while i < chars.len() {
         let st = styles.get(i).copied().unwrap_or(CharStyle { bold: fallback.0, italic: fallback.1, underline: false, color: None });
+        let is_sel = selection.is_some_and(|(start, end)| i >= start && i < end);
         let mut run = String::new();
         while i < chars.len() {
             let next_st = styles.get(i).copied().unwrap_or(CharStyle { bold: fallback.0, italic: fallback.1, underline: false, color: None });
-            if next_st != st {
+            let next_sel = selection.is_some_and(|(start, end)| i >= start && i < end);
+            if next_st != st || next_sel != is_sel {
                 break;
             }
             run.push(chars[i]);
@@ -767,7 +784,8 @@ pub(crate) fn format_comment_galley_styled(
         let font_id = if st.bold { theme::semibold(font_size) } else { theme::regular(font_size) };
         let color = st.color.unwrap_or(text_color);
         let underline = if st.underline { egui::Stroke::new(1.0, color) } else { egui::Stroke::NONE };
-        job.append(&run, 0.0, egui::TextFormat { font_id, color, italics: st.italic, underline, ..Default::default() });
+        let background = if is_sel { Color32::from_rgba_unmultiplied(20, 115, 230, 80) } else { Color32::TRANSPARENT };
+        job.append(&run, 0.0, egui::TextFormat { font_id, color, italics: st.italic, underline, background, ..Default::default() });
     }
     ui.painter().layout_job(job)
 }

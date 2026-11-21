@@ -586,19 +586,31 @@ fn card(ui: &mut egui::Ui, view: &mut DocView, context: CardContext<'_>) -> Opti
                     });
                     crate::comments::sync_char_styles(&view.comments.reply, &mut styles, bold, italic);
                     let styles_ref = &styles;
-                    let mut layouter = |ui: &egui::Ui, text: &dyn egui::TextBuffer, wrap: f32| {
-                        crate::comments::format_comment_galley_styled(ui, text.as_str(), 13.0, wrap, t.text, styles_ref, (bold, italic))
-                    };
                     let field_id = ui.scope_id().with(id_salt);
+                    let sel_key = field_id.with("saved_selection");
+                    let saved_sel = ui.data(|d| d.get_temp::<(usize, usize)>(sel_key));
+                    let mut layouter = move |ui: &egui::Ui, text: &dyn egui::TextBuffer, wrap: f32| {
+                        crate::comments::format_comment_galley_styled_with_selection(
+                            ui,
+                            text.as_str(),
+                            13.0,
+                            wrap,
+                            t.text,
+                            styles_ref,
+                            (bold, italic),
+                            saved_sel,
+                        )
+                    };
                     let r = ui.add(
                         crate::widgets::block(&mut view.comments.reply)
+                            .id(field_id)
                             .layouter(&mut layouter)
                             .desired_rows(1)
                             .return_key(egui::KeyboardShortcut::new(egui::Modifiers::SHIFT, egui::Key::Enter))
                             .hint_text(tl!("Add a reply"))
-                            .desired_width(f32::INFINITY)
-                            .id_salt(id_salt),
+                            .desired_width(f32::INFINITY),
                     );
+                    let field_id = r.id;
                     let sel_key = field_id.with("saved_selection");
                     if let Some(sel) = crate::comments::get_text_selection(ui.ctx(), field_id) {
                         ui.data_mut(|d| d.insert_temp(sel_key, sel));
@@ -779,15 +791,17 @@ fn inline_editor(ui: &mut egui::Ui, t: &Tokens, view: &mut DocView, key: (usize,
     });
     crate::comments::sync_char_styles(text, &mut styles, bold, italic);
     let styles_ref = &styles;
-    let mut layouter = |ui: &egui::Ui, text: &dyn egui::TextBuffer, wrap: f32| {
-        crate::comments::format_comment_galley_styled(ui, text.as_str(), 13.0, wrap, t.text, styles_ref, (bold, italic))
-    };
     let field_id = ui.scope_id().with(id_salt);
-    let r = ui.add(crate::widgets::block(text).layouter(&mut layouter).desired_rows(rows).desired_width(f32::INFINITY).id_salt(id_salt));
     let sel_key = field_id.with("saved_selection");
+    let saved_sel = ui.data(|d| d.get_temp::<(usize, usize)>(sel_key));
+    let mut layouter = move |ui: &egui::Ui, text: &dyn egui::TextBuffer, wrap: f32| {
+        crate::comments::format_comment_galley_styled_with_selection(ui, text.as_str(), 13.0, wrap, t.text, styles_ref, (bold, italic), saved_sel)
+    };
+    let r = ui.add(crate::widgets::block(text).id(field_id).layouter(&mut layouter).desired_rows(rows).desired_width(f32::INFINITY));
+    let field_id = r.id;
     if let Some(sel) = crate::comments::get_text_selection(ui.ctx(), field_id) {
         ui.data_mut(|d| d.insert_temp(sel_key, sel));
-    } else if r.clicked_by(egui::PointerButton::Primary) {
+    } else if r.clicked_by(egui::PointerButton::Primary) && crate::comments::get_text_selection(ui.ctx(), field_id).is_none() {
         ui.data_mut(|d| d.remove::<(usize, usize)>(sel_key));
     }
     if r.secondary_clicked()
@@ -818,10 +832,37 @@ fn inline_editor(ui: &mut egui::Ui, t: &Tokens, view: &mut DocView, key: (usize,
         None => {}
     }
     let submit = crate::comments::submit_key(ui, &r, false);
+    let mut do_save = false;
+    let mut do_cancel = false;
+    let mut do_bold = false;
+    let mut do_italic = false;
     ui.horizontal(|ui| {
-        if (ui.add(egui::Button::new(egui::RichText::new(tl!("Save")).color(Color32::WHITE)).fill(t.accent).corner_radius(12)).clicked() || submit)
-            && let Some((page, index, text)) = view.comments.editing.take()
-        {
+        if ui.add(egui::Button::new(egui::RichText::new(tl!("Save")).color(Color32::WHITE)).fill(t.accent).corner_radius(12)).clicked() || submit {
+            do_save = true;
+        }
+        if ui.button(tl!("Cancel")).clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+            do_cancel = true;
+        }
+        let any_bold = styles.iter().any(|s| s.bold);
+        let btn_b = egui::Button::new(egui::RichText::new("B").font(theme::semibold(12.0)))
+            .min_size(egui::vec2(22.0, 20.0))
+            .fill(if any_bold { t.accent.gamma_multiply(0.2) } else { Color32::TRANSPARENT })
+            .stroke(if any_bold { egui::Stroke::new(1.0, t.accent) } else { egui::Stroke::NONE });
+        if ui.add(btn_b).on_hover_text(tl!("Bold (Ctrl+B)")).clicked() {
+            do_bold = true;
+        }
+        let any_italic = styles.iter().any(|s| s.italic);
+        let btn_i = egui::Button::new(egui::RichText::new("I").font(theme::regular(12.0)).italics())
+            .min_size(egui::vec2(22.0, 20.0))
+            .fill(if any_italic { t.accent.gamma_multiply(0.2) } else { Color32::TRANSPARENT })
+            .stroke(if any_italic { egui::Stroke::new(1.0, t.accent) } else { egui::Stroke::NONE });
+        if ui.add(btn_i).on_hover_text(tl!("Italic (Ctrl+I)")).clicked() {
+            do_italic = true;
+        }
+    });
+
+    if do_save {
+        if let Some((page, index, text)) = view.comments.editing.take() {
             let rc = if styles.iter().any(|st| st.bold || st.italic || st.underline || st.color.is_some()) {
                 Some(crate::comments::styles_to_rc(text.trim_end(), &styles, bold, italic))
             } else {
@@ -831,12 +872,30 @@ fn inline_editor(ui: &mut egui::Ui, t: &Tokens, view: &mut DocView, key: (usize,
             view.comments.inline_undo.remove(&key);
             edit = Some(Edit::SetAnnotationContents { page, index, text: text.trim_end().to_string(), rc });
         }
-        if ui.button(tl!("Cancel")).clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
-            view.comments.editing = None;
-            view.comments.inline_styles.remove(&key);
-            view.comments.inline_undo.remove(&key);
+    } else if do_cancel {
+        view.comments.editing = None;
+        view.comments.inline_styles.remove(&key);
+        view.comments.inline_undo.remove(&key);
+    } else {
+        if do_bold {
+            let sel = crate::comments::get_text_selection(ui.ctx(), field_id).or_else(|| ui.data(|d| d.get_temp::<(usize, usize)>(sel_key)));
+            view.comments.inline_undo.insert(key, (text.clone(), styles.clone()));
+            crate::comments::toggle_bold_range(&mut styles, sel, &mut bold);
+            view.comments.inline_styles.insert(key, styles.clone());
+            if let Some((start, end)) = sel {
+                crate::comments::reselect_range(ui.ctx(), field_id, start, end);
+            }
         }
-    });
+        if do_italic {
+            let sel = crate::comments::get_text_selection(ui.ctx(), field_id).or_else(|| ui.data(|d| d.get_temp::<(usize, usize)>(sel_key)));
+            view.comments.inline_undo.insert(key, (text.clone(), styles.clone()));
+            crate::comments::toggle_italic_range(&mut styles, sel, &mut italic);
+            view.comments.inline_styles.insert(key, styles.clone());
+            if let Some((start, end)) = sel {
+                crate::comments::reselect_range(ui.ctx(), field_id, start, end);
+            }
+        }
+    }
     edit
 }
 

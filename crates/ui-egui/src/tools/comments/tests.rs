@@ -1111,4 +1111,14 @@ fn comment_panel_inline_edit_preserves_rc_and_character_styles() {
     let saved_styles = cv.inline_styles.remove(&(page, index)).unwrap();
     let saved_rc = styles_to_rc(&text, &saved_styles, false, false);
     assert!(saved_rc.contains("font-weight:bold;"));
+
+    // Verify visual selection styling with background highlight
+    let ctx = egui::Context::default();
+    ctx.run_ui(egui::RawInput::default(), |ui| {
+        use super::composer::format_comment_galley_styled_with_selection;
+        let g =
+            format_comment_galley_styled_with_selection(ui, original_text, 13.0, 200.0, Color32::BLACK, &editor_styles, (false, false), Some((0, 8)));
+        assert_eq!(g.text(), original_text);
+    })
+    .drop_without_applying_deltas();
 }

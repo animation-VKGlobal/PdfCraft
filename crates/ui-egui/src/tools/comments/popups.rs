@@ -224,27 +224,30 @@ fn text_box(ui: &mut egui::Ui, parts: &mut Parts<'_>, a: &Annotation, name: &str
         });
         super::composer::sync_char_styles(&text, &mut styles, bold, italic);
         let styles_ref = &styles;
-        let mut layouter = |ui: &egui::Ui, text: &dyn egui::TextBuffer, wrap: f32| {
-            super::composer::format_comment_galley_styled(ui, text.as_str(), 12.5, wrap, parts.pal.ink, styles_ref, (bold, italic))
-        };
         let field_id = ui.scope_id().with(id_salt);
+        let sel_key = field_id.with("saved_selection");
+        let saved_sel = ui.data(|d| d.get_temp::<(usize, usize)>(sel_key));
+        let ink = parts.pal.ink;
+        let mut layouter = move |ui: &egui::Ui, text: &dyn egui::TextBuffer, wrap: f32| {
+            super::composer::format_comment_galley_styled_with_selection(ui, text.as_str(), 12.5, wrap, ink, styles_ref, (bold, italic), saved_sel)
+        };
         let field = ui
             .add(
                 egui::TextEdit::multiline(&mut text)
+                    .id(field_id)
                     .layouter(&mut layouter)
                     .desired_rows(1)
                     .desired_width(f32::INFINITY)
                     .font(theme::regular(12.5))
                     .text_color(parts.pal.ink)
                     .background_color(Color32::WHITE)
-                    .margin(egui::Margin::symmetric(4, 2))
-                    .id_salt(id_salt),
+                    .margin(egui::Margin::symmetric(4, 2)),
             )
             .accessible_name(name);
-        let sel_key = field_id.with("saved_selection");
+        let field_id = field.id;
         if let Some(sel) = super::composer::get_text_selection(ui.ctx(), field_id) {
             ui.data_mut(|d| d.insert_temp(sel_key, sel));
-        } else if field.clicked_by(egui::PointerButton::Primary) {
+        } else if field.clicked_by(egui::PointerButton::Primary) && super::composer::get_text_selection(ui.ctx(), field_id).is_none() {
             ui.data_mut(|d| d.remove::<(usize, usize)>(sel_key));
         }
         if field.secondary_clicked()
