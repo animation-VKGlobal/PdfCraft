@@ -199,6 +199,14 @@ pub struct CommentView {
     pub popup_styles: HashMap<(usize, usize), Vec<CharStyle>>,
     /// Previous text and styles snapshot for Undo Text Change in popup: (page, index) -> (text, styles)
     pub popup_undo: HashMap<(usize, usize), (String, Vec<CharStyle>)>,
+    /// Character formatting styles for inline comment editing in the Comments panel: (page, index) -> styles
+    pub inline_styles: HashMap<(usize, usize), Vec<CharStyle>>,
+    /// Previous text and styles snapshot for Undo Text Change in inline editor: (page, index) -> (text, styles)
+    pub inline_undo: HashMap<(usize, usize), (String, Vec<CharStyle>)>,
+    /// Character formatting styles for replies in the Comments panel: (page, index) -> styles
+    pub reply_styles: HashMap<(usize, usize), Vec<CharStyle>>,
+    /// Previous text and styles snapshot for replies in the Comments panel: (page, index) -> (text, styles)
+    pub reply_undo: HashMap<(usize, usize), (String, Vec<CharStyle>)>,
     /// A reply being typed in a pop-up window: the comment or reply it answers (page, index), and its text.
     pub popup_reply: Option<(usize, usize, String)>,
     /// Where each open pop-up was drawn last frame, for the connector lines and hit-testing.
@@ -433,6 +441,8 @@ impl CommentView {
     pub(crate) fn open_editor(&mut self, page: usize, index: usize, text: String) {
         self.editing = Some((page, index, text));
         self.editor_focus = Some(EditorFocus::Take);
+        self.inline_styles.remove(&(page, index));
+        self.inline_undo.remove(&(page, index));
     }
 
     /// A comment was just added. The editor open on another one must not keep the keyboard, or
@@ -474,6 +484,10 @@ impl CommentView {
         self.popup_reply = popup_reply;
         self.popup_drag = popup_drag;
         self.popup_resize = popup_resize;
+        self.inline_styles.remove(&gone);
+        self.inline_undo.remove(&gone);
+        self.reply_styles.remove(&gone);
+        self.reply_undo.remove(&gone);
     }
 
     /// Undo or Redo just ran. Either may have put annotations back or taken them away, on any

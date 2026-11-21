@@ -863,7 +863,7 @@ pub(crate) fn rc_to_char_styles(rc: &str, text: &str) -> (Vec<CharStyle>, bool, 
                 let tag = &rest[1..tag_end];
                 rest = &rest[tag_end + 1..];
                 if let Some(close_tag) = tag.strip_prefix('/') {
-                    let name = close_tag.trim().split_whitespace().next().unwrap_or_default().to_ascii_lowercase();
+                    let name = close_tag.split_whitespace().next().unwrap_or_default().to_ascii_lowercase();
                     if matches!(name.as_str(), "span" | "b" | "strong" | "i" | "em" | "u" | "p" | "body") {
                         current_style = style_stack.pop().unwrap_or(default_style);
                     }

@@ -3568,6 +3568,7 @@ fn a_moved_comment_is_drawn_where_it_goes_before_release() {
             border_shape: pdfcraft_engine::BorderShape::Rectangle,
             bold: false,
             italic: false,
+            rc: None,
         };
         assert!(h.state_mut().apply_edit(pdfcraft_engine::Edit::AddAnnotation(pdfcraft_engine::NewAnnotation {
             page: 0,

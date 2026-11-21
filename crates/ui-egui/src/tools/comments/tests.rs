@@ -1075,3 +1075,40 @@ fn comment_rich_text_rc_round_trip() {
     assert!(!parsed_styles[7].bold && !parsed_styles[7].italic, "space is unstyled");
     assert!(parsed_styles[8..13].iter().all(|s| !s.bold && s.italic), "image is italic");
 }
+
+#[test]
+fn comment_panel_inline_edit_preserves_rc_and_character_styles() {
+    use super::composer::{rc_to_char_styles, styles_to_rc, sync_char_styles, toggle_bold_range, toggle_italic_range};
+
+    let original_text = "asdsadas sdfsdfsdf";
+    let mut initial_styles = Vec::new();
+    sync_char_styles(original_text, &mut initial_styles, false, false);
+    let mut default_bold = false;
+    let mut default_italic = false;
+    toggle_bold_range(&mut initial_styles, Some((0, 8)), &mut default_bold);
+    toggle_italic_range(&mut initial_styles, Some((9, 18)), &mut default_italic);
+    let rc = styles_to_rc(original_text, &initial_styles, false, false);
+
+    // Simulate opening inline editor in CommentView
+    let mut cv = CommentView::default();
+    cv.open_editor(0, 1, original_text.to_string());
+    assert_eq!(cv.editing, Some((0, 1, original_text.to_string())));
+    assert!(!cv.inline_styles.contains_key(&(0, 1)));
+
+    // Emulate inline_editor reading rc and initializing styles
+    let (mut editor_styles, b, i) = rc_to_char_styles(&rc, original_text);
+    sync_char_styles(original_text, &mut editor_styles, b, i);
+    assert_eq!(editor_styles.len(), 18);
+    assert!(editor_styles[0..8].iter().all(|s| s.bold));
+    assert!(editor_styles[9..18].iter().all(|s| s.italic));
+
+    // Emulate formatting change during edit (e.g. bolding remaining text too)
+    toggle_bold_range(&mut editor_styles, Some((9, 18)), &mut default_bold);
+    cv.inline_styles.insert((0, 1), editor_styles.clone());
+
+    // Emulate saving
+    let (page, index, text) = cv.editing.take().unwrap();
+    let saved_styles = cv.inline_styles.remove(&(page, index)).unwrap();
+    let saved_rc = styles_to_rc(&text, &saved_styles, false, false);
+    assert!(saved_rc.contains("font-weight:bold;"));
+}

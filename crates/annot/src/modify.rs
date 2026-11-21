@@ -381,7 +381,7 @@ fn fitted_box(doc: &Document, r: ObjRef, text: &str) -> Option<[f64; 4]> {
 /// parent's rectangle and an empty appearance, so it shows in comment lists but never paints a
 /// second icon on the page.
 pub fn add_reply(doc: &mut Document, page: usize, index: usize, text: &str, author: &str, meta: &Meta) -> Result<usize, AnnotError> {
-    reply(doc, page, index, text, author, meta, None, None)
+    reply(doc, (page, index), text, author, meta, None, None)
 }
 
 /// [`add_reply`] with optional rich text (`/RC`).
@@ -394,7 +394,7 @@ pub fn add_reply_rich(
     rc: Option<&str>,
     meta: &Meta,
 ) -> Result<usize, AnnotError> {
-    reply(doc, page, index, text, author, meta, None, rc)
+    reply(doc, (page, index), text, author, meta, None, rc)
 }
 
 /// Set a comment's review status ("Set status ▸ Accepted"…). This adds a hidden state reply
@@ -402,20 +402,19 @@ pub fn add_reply_rich(
 /// one; each reviewer's latest is their status.
 pub fn set_review_state(doc: &mut Document, page: usize, index: usize, state: ReviewState, author: &str, meta: &Meta) -> Result<usize, AnnotError> {
     let text = format!("{} set by {}", state.name(), if author.is_empty() { "unknown" } else { author });
-    reply(doc, page, index, &text, author, meta, Some(state), None)
+    reply(doc, (page, index), &text, author, meta, Some(state), None)
 }
 
 fn reply(
     doc: &mut Document,
-    page: usize,
-    index: usize,
+    target: (usize, usize),
     text: &str,
     author: &str,
     meta: &Meta,
     state: Option<ReviewState>,
     rc: Option<&str>,
 ) -> Result<usize, AnnotError> {
-    let (p, parent) = annot_ref(doc, page, index)?;
+    let (p, parent) = annot_ref(doc, target.0, target.1)?;
     let pd = annot_dict(doc, parent);
     if pd.name(b"Subtype") == Some(b"Popup") {
         return Err(AnnotError::Invalid("pop-ups can't be replied to".into()));

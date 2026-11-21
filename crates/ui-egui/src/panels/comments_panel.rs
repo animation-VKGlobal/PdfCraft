@@ -477,7 +477,7 @@ fn card(ui: &mut egui::Ui, view: &mut DocView, context: CardContext<'_>) -> Opti
             let body = egui::Frame::NONE.inner_margin(egui::Margin { left: 34, right: 0, top: 4, bottom: 0 }).show(ui, |ui| {
                 ui.set_width(ui.available_width());
                 if editing {
-                    if let Some(e) = inline_editor(ui, t, view, key, 2) {
+                    if let Some(e) = inline_editor(ui, t, view, key, 2, a) {
                         edit = Some(e);
                     }
                 } else {
@@ -545,7 +545,7 @@ fn card(ui: &mut egui::Ui, view: &mut DocView, context: CardContext<'_>) -> Opti
                         });
                         let open = view.comments.editing.as_ref().is_some_and(|(p, i, _)| (*p, *i) == reply_key);
                         if open {
-                            if let Some(e) = inline_editor(ui, t, view, reply_key, 1) {
+                            if let Some(e) = inline_editor(ui, t, view, reply_key, 1, r) {
                                 edit = Some(e);
                             }
                         } else {
@@ -581,9 +581,15 @@ fn card(ui: &mut egui::Ui, view: &mut DocView, context: CardContext<'_>) -> Opti
                     let id_salt = ("comment-reply", key);
                     let mut bold = false;
                     let mut italic = false;
+                    let mut styles = view.comments.reply_styles.get(&key).cloned().unwrap_or_else(|| {
+                        vec![crate::comments::CharStyle { bold, italic, underline: false, color: None }; view.comments.reply.chars().count()]
+                    });
+                    crate::comments::sync_char_styles(&view.comments.reply, &mut styles, bold, italic);
+                    let styles_ref = &styles;
                     let mut layouter = |ui: &egui::Ui, text: &dyn egui::TextBuffer, wrap: f32| {
-                        crate::comments::format_comment_galley(ui, text.as_str(), 13.0, wrap, t.text, bold, italic)
+                        crate::comments::format_comment_galley_styled(ui, text.as_str(), 13.0, wrap, t.text, styles_ref, (bold, italic))
                     };
+                    let field_id = ui.scope_id().with(id_salt);
                     let r = ui.add(
                         crate::widgets::block(&mut view.comments.reply)
                             .layouter(&mut layouter)
@@ -593,14 +599,56 @@ fn card(ui: &mut egui::Ui, view: &mut DocView, context: CardContext<'_>) -> Opti
                             .desired_width(f32::INFINITY)
                             .id_salt(id_salt),
                     );
-                    crate::comments::format_keys(ui, &r, &mut bold, &mut italic);
+                    let sel_key = field_id.with("saved_selection");
+                    if let Some(sel) = crate::comments::get_text_selection(ui.ctx(), field_id) {
+                        ui.data_mut(|d| d.insert_temp(sel_key, sel));
+                    } else if r.clicked_by(egui::PointerButton::Primary) {
+                        ui.data_mut(|d| d.remove::<(usize, usize)>(sel_key));
+                    }
+                    if r.secondary_clicked()
+                        && let Some((start, end)) = ui.data(|d| d.get_temp::<(usize, usize)>(sel_key))
+                    {
+                        let count = view.comments.reply.chars().count();
+                        if start < count && end <= count && start < end {
+                            crate::comments::reselect_range(ui.ctx(), field_id, start, end);
+                        }
+                    }
+                    let mut undo = view.comments.reply_undo.get(&key).cloned();
+                    crate::comments::format_editor_keys(ui, &r, &mut view.comments.reply, &mut styles, &mut undo, &mut bold, &mut italic);
+                    let mut undo_copy = undo.clone();
+                    r.context_menu(|ui| {
+                        crate::comments::show_comment_text_context_menu(
+                            ui,
+                            field_id,
+                            &mut view.comments.reply,
+                            &mut styles,
+                            &mut undo_copy,
+                            &mut bold,
+                            &mut italic,
+                        );
+                    });
+                    if undo_copy != undo {
+                        if let Some(u) = undo_copy {
+                            view.comments.reply_undo.insert(key, u);
+                        } else {
+                            view.comments.reply_undo.remove(&key);
+                        }
+                    }
+                    view.comments.reply_styles.insert(key, styles.clone());
                     let enter = crate::comments::submit_key(ui, &r, true);
                     let ok = !view.comments.reply.trim().is_empty();
                     let post =
                         ui.with_layout(Layout::right_to_left(Align::Min), |ui| ui.add_enabled(ok, egui::Button::new(tl!("Post")).corner_radius(12)));
                     if (post.inner.clicked() || enter) && ok {
                         let text = std::mem::take(&mut view.comments.reply).trim().to_string();
-                        edit = Some(Edit::ReplyToAnnotation { page: a.page, index: a.index, text, author: prefs.author.clone(), rc: None });
+                        let rc = if styles.iter().any(|st| st.bold || st.italic || st.underline || st.color.is_some()) {
+                            Some(crate::comments::styles_to_rc(&text, &styles, bold, italic))
+                        } else {
+                            None
+                        };
+                        view.comments.reply_styles.remove(&key);
+                        view.comments.reply_undo.remove(&key);
+                        edit = Some(Edit::ReplyToAnnotation { page: a.page, index: a.index, text, author: prefs.author.clone(), rc });
                     }
                 });
             }
@@ -712,17 +760,58 @@ fn card(ui: &mut egui::Ui, view: &mut DocView, context: CardContext<'_>) -> Opti
 
 /// The inline editor open on comment or reply `key` in the panel, with Save and Cancel; returns
 /// the edit Save makes.
-fn inline_editor(ui: &mut egui::Ui, t: &Tokens, view: &mut DocView, key: (usize, usize), rows: usize) -> Option<Edit> {
+fn inline_editor(ui: &mut egui::Ui, t: &Tokens, view: &mut DocView, key: (usize, usize), rows: usize, a: &Annotation) -> Option<Edit> {
     let mut edit = None;
     let (_, _, text) = view.comments.editing.as_mut()?;
     let id_salt = ("comment-edit", key);
-    let mut bold = false;
-    let mut italic = false;
+    let mut bold = a.bold;
+    let mut italic = a.italic;
+    let mut styles = view.comments.inline_styles.get(&key).cloned().unwrap_or_else(|| {
+        if let Some(rc) = a.rc.as_deref() {
+            let (mut st, b, i) = crate::comments::rc_to_char_styles(rc, text);
+            if !st.is_empty() {
+                crate::comments::sync_char_styles(text, &mut st, b, i);
+                return st;
+            }
+        }
+        let count = text.chars().count();
+        vec![crate::comments::CharStyle { bold, italic, underline: false, color: None }; count]
+    });
+    crate::comments::sync_char_styles(text, &mut styles, bold, italic);
+    let styles_ref = &styles;
     let mut layouter = |ui: &egui::Ui, text: &dyn egui::TextBuffer, wrap: f32| {
-        crate::comments::format_comment_galley(ui, text.as_str(), 13.0, wrap, t.text, bold, italic)
+        crate::comments::format_comment_galley_styled(ui, text.as_str(), 13.0, wrap, t.text, styles_ref, (bold, italic))
     };
+    let field_id = ui.scope_id().with(id_salt);
     let r = ui.add(crate::widgets::block(text).layouter(&mut layouter).desired_rows(rows).desired_width(f32::INFINITY).id_salt(id_salt));
-    crate::comments::format_keys(ui, &r, &mut bold, &mut italic);
+    let sel_key = field_id.with("saved_selection");
+    if let Some(sel) = crate::comments::get_text_selection(ui.ctx(), field_id) {
+        ui.data_mut(|d| d.insert_temp(sel_key, sel));
+    } else if r.clicked_by(egui::PointerButton::Primary) {
+        ui.data_mut(|d| d.remove::<(usize, usize)>(sel_key));
+    }
+    if r.secondary_clicked()
+        && let Some((start, end)) = ui.data(|d| d.get_temp::<(usize, usize)>(sel_key))
+    {
+        let count = text.chars().count();
+        if start < count && end <= count && start < end {
+            crate::comments::reselect_range(ui.ctx(), field_id, start, end);
+        }
+    }
+    let mut undo = view.comments.inline_undo.get(&key).cloned();
+    crate::comments::format_editor_keys(ui, &r, text, &mut styles, &mut undo, &mut bold, &mut italic);
+    let mut undo_copy = undo.clone();
+    r.context_menu(|ui| {
+        crate::comments::show_comment_text_context_menu(ui, field_id, text, &mut styles, &mut undo_copy, &mut bold, &mut italic);
+    });
+    if undo_copy != undo {
+        if let Some(u) = undo_copy {
+            view.comments.inline_undo.insert(key, u);
+        } else {
+            view.comments.inline_undo.remove(&key);
+        }
+    }
+    view.comments.inline_styles.insert(key, styles.clone());
     match view.comments.editor_focus.take() {
         Some(crate::comments::EditorFocus::Take) => r.request_focus(),
         Some(crate::comments::EditorFocus::Release) => r.surrender_focus(),
@@ -733,10 +822,19 @@ fn inline_editor(ui: &mut egui::Ui, t: &Tokens, view: &mut DocView, key: (usize,
         if (ui.add(egui::Button::new(egui::RichText::new(tl!("Save")).color(Color32::WHITE)).fill(t.accent).corner_radius(12)).clicked() || submit)
             && let Some((page, index, text)) = view.comments.editing.take()
         {
-            edit = Some(Edit::SetAnnotationContents { page, index, text, rc: None });
+            let rc = if styles.iter().any(|st| st.bold || st.italic || st.underline || st.color.is_some()) {
+                Some(crate::comments::styles_to_rc(text.trim_end(), &styles, bold, italic))
+            } else {
+                None
+            };
+            view.comments.inline_styles.remove(&key);
+            view.comments.inline_undo.remove(&key);
+            edit = Some(Edit::SetAnnotationContents { page, index, text: text.trim_end().to_string(), rc });
         }
         if ui.button(tl!("Cancel")).clicked() || ui.input(|i| i.key_pressed(egui::Key::Escape)) {
             view.comments.editing = None;
+            view.comments.inline_styles.remove(&key);
+            view.comments.inline_undo.remove(&key);
         }
     });
     edit

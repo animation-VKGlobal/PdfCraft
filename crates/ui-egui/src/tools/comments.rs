@@ -29,7 +29,10 @@ mod paint;
 mod popups;
 mod state;
 
-pub(crate) use composer::{composer, format_comment_galley, format_keys, rc_to_char_styles, submit_key};
+pub(crate) use composer::{
+    composer, format_comment_galley, format_comment_galley_styled, format_editor_keys, format_keys, get_text_selection, rc_to_char_styles,
+    reselect_range, show_comment_text_context_menu, styles_to_rc, submit_key, sync_char_styles,
+};
 #[cfg(test)]
 use geometry::handle_pos;
 #[cfg(test)]
