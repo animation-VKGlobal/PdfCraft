@@ -55,7 +55,7 @@ pub use cache::RasterMemory;
 pub(crate) use cache::apply_output_preview_filter;
 pub(crate) use cache::{
     BASE_SIDE, OP_ACTIVE, OP_COLOR_WARNINGS, OP_NO_BLACK, OP_NO_CYAN, OP_NO_MAGENTA, OP_NO_YELLOW, OP_TAC_LIMIT_MASK, OP_TAC_LIMIT_SHIFT,
-    OP_TAC_WARN, TILE_THRESHOLD, texture_image, thumbnail_rows,
+    OP_TAC_WARN, OP_WARN_OVERPRINT, OP_WARN_RICH_BLACK, TILE_THRESHOLD, texture_image, thumbnail_rows,
 };
 #[cfg(test)]
 use cache::{
@@ -1446,6 +1446,7 @@ struct PageEnv<'a> {
     today: (i64, u32, u32),
     can_paste_image: bool,
     output_preview_boxes: bool,
+    output_preview_inspect: Option<(usize, [f64; 4])>,
     op_tag: u64,
 }
 
@@ -1855,6 +1856,11 @@ fn draw_page(ui: &mut egui::Ui, view: &mut DocView, frame: &mut PageFrame<'_>, i
     page_overlays(ui, view, frame, &slot, &input);
     if frame.env.output_preview_boxes {
         crate::dialogs::output_preview_ui::paint_output_preview_boxes(ui.painter(), &xf, frame.env.info, frame.env.doc, i);
+    }
+    if let Some((page, bounds)) = frame.env.output_preview_inspect
+        && page == i
+    {
+        crate::dialogs::output_preview_ui::paint_inspected_object_outline(ui.painter(), &xf, frame.env.info, i, bounds);
     }
 }
 
@@ -3323,7 +3329,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
     let keys = app.page_keys;
     let organize_zoom = app.organize_zoom;
     let invert_middle = app.invert_middle_drag;
-    let (op_tag, op_paper) = output_preview_settings(app);
+    let (op_tag, op_paper, op_inspect) = output_preview_settings(app);
     let view = &mut app.views[index];
     if view.organize {
         // One remembered grid size for every document, kept in the settings.
@@ -3520,6 +3526,7 @@ pub fn document_area(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui) {
         today,
         can_paste_image,
         output_preview_boxes: matches!(app.dialog, Some(crate::Dialog::OutputPreview)) && app.output_preview_draft.show_boxes,
+        output_preview_inspect: op_inspect,
         op_tag,
     };
     let mut page_out = PageOut::default();
@@ -3966,7 +3973,9 @@ fn apply_frame_requests(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui, 
     update_output_preview_hover(app, index, pointer);
 }
 
-fn output_preview_settings(app: &PdfCraftApp) -> (u64, Option<Color32>) {
+type OutputPreviewConfig = (u64, Option<Color32>, Option<(usize, [f64; 4])>);
+
+fn output_preview_settings(app: &PdfCraftApp) -> OutputPreviewConfig {
     if matches!(app.dialog, Some(crate::Dialog::OutputPreview)) {
         let tag = app.output_preview_draft.filter_tag();
         let paper = if app.output_preview_draft.simulate_paper_color || app.output_preview_draft.set_page_bg_color {
@@ -3978,9 +3987,14 @@ fn output_preview_settings(app: &PdfCraftApp) -> (u64, Option<Color32>) {
         } else {
             None
         };
-        (tag, paper)
+        let inspect = if app.output_preview_draft.preview_mode == "Object Inspector" {
+            app.output_preview_draft.inspected_object.as_ref().map(|o| (o.page, o.bounds))
+        } else {
+            None
+        };
+        (tag, paper, inspect)
     } else {
-        (0, None)
+        (0, None, None)
     }
 }
 

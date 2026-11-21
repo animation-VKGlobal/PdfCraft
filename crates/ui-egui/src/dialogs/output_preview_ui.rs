@@ -8,6 +8,23 @@ use egui::{Align, Color32, CornerRadius, Layout, Sense, Stroke, vec2};
 use crate::theme::{self, Tokens};
 use crate::{Dialog, PdfCraftApp, widgets};
 
+/// An inspected page object under the pointer in Object Inspector mode.
+#[derive(Clone, Debug, PartialEq)]
+pub struct InspectedObject {
+    pub page: usize,
+    pub kind: String,
+    pub bounds: [f64; 4],
+    pub font_name: Option<String>,
+    pub font_size: Option<f64>,
+    pub text: Option<String>,
+    pub dimensions: Option<(u32, u32)>,
+    pub resolution_ppi: Option<u32>,
+    pub color_space: String,
+    pub cmyk: (f32, f32, f32, f32),
+    pub overprint: bool,
+    pub blend_mode: String,
+}
+
 /// Settings and live inspection values of the Output Preview inspector.
 #[derive(Clone, Debug, PartialEq)]
 pub struct OutputPreviewDraft {
@@ -33,9 +50,12 @@ pub struct OutputPreviewDraft {
     pub sample_size: String,
     pub total_area_coverage_warn: bool,
     pub total_area_coverage_limit: u32,
+    pub warn_overprinting: bool,
+    pub warn_rich_black: bool,
     pub page_has_transparency: bool,
     pub transparency_blending_space: String,
     pub last_sample_pos: Option<(usize, [f32; 2])>,
+    pub inspected_object: Option<InspectedObject>,
 }
 
 impl Default for OutputPreviewDraft {
@@ -63,9 +83,12 @@ impl Default for OutputPreviewDraft {
             sample_size: "Point Sample".into(),
             total_area_coverage_warn: false,
             total_area_coverage_limit: 280,
+            warn_overprinting: true,
+            warn_rich_black: true,
             page_has_transparency: false,
             transparency_blending_space: "DeviceCMYK".into(),
             last_sample_pos: None,
+            inspected_object: None,
         }
     }
 }
@@ -109,13 +132,19 @@ impl OutputPreviewDraft {
                 tag |= crate::canvas::OP_NO_BLACK;
             }
         }
-        if self.total_area_coverage_warn {
+        if self.total_area_coverage_warn || is_color_warn {
             tag |= crate::canvas::OP_TAC_WARN;
             let limit = (u64::from(self.total_area_coverage_limit) & crate::canvas::OP_TAC_LIMIT_MASK) << crate::canvas::OP_TAC_LIMIT_SHIFT;
             tag |= limit;
         }
         if is_color_warn {
             tag |= crate::canvas::OP_COLOR_WARNINGS;
+            if self.warn_rich_black {
+                tag |= crate::canvas::OP_WARN_RICH_BLACK;
+            }
+            if self.warn_overprinting {
+                tag |= crate::canvas::OP_WARN_OVERPRINT;
+            }
         }
         tag
     }
@@ -236,81 +265,11 @@ pub fn show(app: &mut PdfCraftApp, ctx: &egui::Context) {
                 });
                 ui.add_space(6.0);
 
-                // ---- Separations Table -------------------------------------------------------
-                ui.label(egui::RichText::new(tl!("Separations")).font(theme::semibold(13.0)));
-                egui::Frame::NONE
-                    .fill(t.field)
-                    .stroke(Stroke::new(1.0, t.border))
-                    .corner_radius(CornerRadius::same(4))
-                    .inner_margin(egui::Margin::same(8))
-                    .show(ui, |ui| {
-                        ui.set_width(ui.available_width());
-
-                        // Process Plates master row
-                        let mut proc = d.process_plates;
-                        if ui.add(widgets::checkbox(&mut proc, tl!("Process Plates"))).changed() {
-                            d.process_plates = proc;
-                            d.plate_cyan = proc;
-                            d.plate_magenta = proc;
-                            d.plate_yellow = proc;
-                            d.plate_black = proc;
-                        }
-                        ui.add_space(2.0);
-
-                        // Cyan
-                        ui.horizontal(|ui| {
-                            ui.add(widgets::checkbox_without_text(&mut d.plate_cyan));
-                            color_swatch(ui, Color32::from_rgb(0, 174, 239));
-                            ui.label(tl!("Process Cyan"));
-                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                ui.label(format!("{:.0}%", d.sample_cyan));
-                            });
-                        });
-                        ui.add_space(2.0);
-
-                        // Magenta
-                        ui.horizontal(|ui| {
-                            ui.add(widgets::checkbox_without_text(&mut d.plate_magenta));
-                            color_swatch(ui, Color32::from_rgb(236, 0, 140));
-                            ui.label(tl!("Process Magenta"));
-                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                ui.label(format!("{:.0}%", d.sample_magenta));
-                            });
-                        });
-                        ui.add_space(2.0);
-
-                        // Yellow
-                        ui.horizontal(|ui| {
-                            ui.add(widgets::checkbox_without_text(&mut d.plate_yellow));
-                            color_swatch(ui, Color32::from_rgb(255, 242, 0));
-                            ui.label(tl!("Process Yellow"));
-                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                ui.label(format!("{:.0}%", d.sample_yellow));
-                            });
-                        });
-                        ui.add_space(2.0);
-
-                        // Black
-                        ui.horizontal(|ui| {
-                            ui.add(widgets::checkbox_without_text(&mut d.plate_black));
-                            color_swatch(ui, Color32::from_rgb(0, 0, 0));
-                            ui.label(tl!("Process Black"));
-                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                ui.label(format!("{:.0}%", d.sample_black));
-                            });
-                        });
-                        ui.add_space(4.0);
-
-                        // Total Area Coverage sum
-                        let total = d.sample_cyan + d.sample_magenta + d.sample_yellow + d.sample_black;
-                        ui.horizontal(|ui| {
-                            ui.add_space(32.0);
-                            ui.label(egui::RichText::new(tl!("Total Area Coverage")).font(theme::semibold(12.0)));
-                            ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                ui.label(egui::RichText::new(format!("{total:.0}%")).font(theme::semibold(12.0)));
-                            });
-                        });
-                    });
+                match d.preview_mode.as_str() {
+                    "Color Warnings" => show_color_warnings_panel(ui, d, &t),
+                    "Object Inspector" => show_object_inspector_panel(ui, d, &t),
+                    _ => show_separations_panel(ui, d, &t),
+                }
                 ui.add_space(8.0);
 
                 // ---- Sample Size & TAC limit -------------------------------------------------
@@ -322,13 +281,14 @@ pub fn show(app: &mut PdfCraftApp, ctx: &egui::Context) {
                         }
                     });
                 });
-                ui.add_space(4.0);
-
-                ui.horizontal(|ui| {
-                    ui.add(widgets::checkbox(&mut d.total_area_coverage_warn, tl!("Total Area Coverage")));
-                    color_swatch(ui, Color32::from_rgb(0, 255, 0));
-                    ui.add(egui::DragValue::new(&mut d.total_area_coverage_limit).range(100..=400).suffix("%"));
-                });
+                if d.preview_mode == "Separations" {
+                    ui.add_space(4.0);
+                    ui.horizontal(|ui| {
+                        ui.add(widgets::checkbox(&mut d.total_area_coverage_warn, tl!("Total Area Coverage")));
+                        color_swatch(ui, Color32::from_rgb(0, 255, 0));
+                        ui.add(egui::DragValue::new(&mut d.total_area_coverage_limit).range(100..=400).suffix("%"));
+                    });
+                }
                 ui.add_space(6.0);
 
                 let has_trans = if d.page_has_transparency { tl!("Yes") } else { tl!("No") };
@@ -363,6 +323,194 @@ pub fn show(app: &mut PdfCraftApp, ctx: &egui::Context) {
             app.invalidate_output_preview();
         }
     }
+}
+
+fn show_separations_panel(ui: &mut egui::Ui, d: &mut OutputPreviewDraft, t: &Tokens) {
+    ui.label(egui::RichText::new(tl!("Separations")).font(theme::semibold(13.0)));
+    egui::Frame::NONE
+        .fill(t.field)
+        .stroke(Stroke::new(1.0, t.border))
+        .corner_radius(CornerRadius::same(4))
+        .inner_margin(egui::Margin::same(8))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+
+            // Process Plates master row
+            let mut proc = d.process_plates;
+            if ui.add(widgets::checkbox(&mut proc, tl!("Process Plates"))).changed() {
+                d.process_plates = proc;
+                d.plate_cyan = proc;
+                d.plate_magenta = proc;
+                d.plate_yellow = proc;
+                d.plate_black = proc;
+            }
+            ui.add_space(2.0);
+
+            let plates = [
+                (&mut d.plate_cyan, Color32::from_rgb(0, 174, 239), tl!("Process Cyan"), d.sample_cyan),
+                (&mut d.plate_magenta, Color32::from_rgb(236, 0, 140), tl!("Process Magenta"), d.sample_magenta),
+                (&mut d.plate_yellow, Color32::from_rgb(255, 242, 0), tl!("Process Yellow"), d.sample_yellow),
+                (&mut d.plate_black, Color32::from_rgb(0, 0, 0), tl!("Process Black"), d.sample_black),
+            ];
+
+            for (checked, swatch, label, val) in plates {
+                ui.horizontal(|ui| {
+                    ui.add(widgets::checkbox_without_text(checked));
+                    color_swatch(ui, swatch);
+                    ui.label(label);
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ui.label(format!("{val:.0}%"));
+                    });
+                });
+                ui.add_space(2.0);
+            }
+            ui.add_space(2.0);
+
+            let total = d.sample_cyan + d.sample_magenta + d.sample_yellow + d.sample_black;
+            ui.horizontal(|ui| {
+                ui.add_space(32.0);
+                ui.label(egui::RichText::new(tl!("Total Area Coverage")).font(theme::semibold(12.0)));
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.label(egui::RichText::new(format!("{total:.0}%")).font(theme::semibold(12.0)));
+                });
+            });
+        });
+}
+
+fn show_color_warnings_panel(ui: &mut egui::Ui, d: &mut OutputPreviewDraft, t: &Tokens) {
+    ui.label(egui::RichText::new(tl!("Color Warnings")).font(theme::semibold(13.0)));
+    egui::Frame::NONE
+        .fill(t.field)
+        .stroke(Stroke::new(1.0, t.border))
+        .corner_radius(CornerRadius::same(4))
+        .inner_margin(egui::Margin::same(8))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            ui.horizontal(|ui| {
+                ui.add(widgets::checkbox(&mut d.warn_overprinting, tl!("Show Overprinting")));
+                color_swatch(ui, Color32::from_rgb(255, 170, 0));
+            });
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.add(widgets::checkbox(&mut d.warn_rich_black, tl!("Show Rich Black")));
+                color_swatch(ui, Color32::from_rgb(204, 0, 0));
+            });
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.add(widgets::checkbox(&mut d.total_area_coverage_warn, tl!("Total Area Coverage")));
+                color_swatch(ui, Color32::from_rgb(0, 255, 0));
+                ui.add(egui::DragValue::new(&mut d.total_area_coverage_limit).range(100..=400).suffix("%"));
+            });
+        });
+    ui.add_space(6.0);
+
+    // Live ink readouts under the cursor
+    egui::Frame::NONE
+        .fill(t.field)
+        .stroke(Stroke::new(1.0, t.border))
+        .corner_radius(CornerRadius::same(4))
+        .inner_margin(egui::Margin::same(8))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            let items = [
+                (tl!("Process Cyan"), d.sample_cyan, Color32::from_rgb(0, 174, 239)),
+                (tl!("Process Magenta"), d.sample_magenta, Color32::from_rgb(236, 0, 140)),
+                (tl!("Process Yellow"), d.sample_yellow, Color32::from_rgb(255, 242, 0)),
+                (tl!("Process Black"), d.sample_black, Color32::from_rgb(0, 0, 0)),
+            ];
+            for (label, val, swatch) in items {
+                ui.horizontal(|ui| {
+                    color_swatch(ui, swatch);
+                    ui.label(label);
+                    ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                        ui.label(format!("{val:.0}%"));
+                    });
+                });
+                ui.add_space(2.0);
+            }
+            let total = d.sample_cyan + d.sample_magenta + d.sample_yellow + d.sample_black;
+            ui.separator();
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new(tl!("Total Area Coverage")).font(theme::semibold(12.0)));
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.label(egui::RichText::new(format!("{total:.0}%")).font(theme::semibold(12.0)));
+                });
+            });
+        });
+}
+
+fn show_object_inspector_panel(ui: &mut egui::Ui, d: &mut OutputPreviewDraft, t: &Tokens) {
+    ui.label(egui::RichText::new(tl!("Object Inspector")).font(theme::semibold(13.0)));
+    egui::Frame::NONE
+        .fill(t.field)
+        .stroke(Stroke::new(1.0, t.border))
+        .corner_radius(CornerRadius::same(4))
+        .inner_margin(egui::Margin::same(8))
+        .show(ui, |ui| {
+            ui.set_width(ui.available_width());
+            if let Some(obj) = &d.inspected_object {
+                ui.label(egui::RichText::new(format!("▼ {} (Page {})", obj.kind, obj.page + 1)).font(theme::semibold(13.0)));
+                ui.add_space(4.0);
+
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(format!("{}:", tl!("Color Space"))).color(t.text_muted));
+                    ui.label(&obj.color_space);
+                });
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(format!("{}:", tl!("Color Values"))).color(t.text_muted));
+                    ui.label(format!("C:{:.0}% M:{:.0}% Y:{:.0}% K:{:.0}%", obj.cmyk.0, obj.cmyk.1, obj.cmyk.2, obj.cmyk.3));
+                });
+
+                if let Some(font) = &obj.font_name {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(format!("{}:", tl!("Font"))).color(t.text_muted));
+                        ui.label(font);
+                    });
+                }
+                if let Some(size) = obj.font_size {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(format!("{}:", tl!("Font Size"))).color(t.text_muted));
+                        ui.label(format!("{size:.1} pt"));
+                    });
+                }
+                if let Some(dims) = obj.dimensions {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(format!("{}:", tl!("Dimensions"))).color(t.text_muted));
+                        ui.label(format!("{} × {} px", dims.0, dims.1));
+                    });
+                }
+                if let Some(res) = obj.resolution_ppi {
+                    ui.horizontal(|ui| {
+                        ui.label(egui::RichText::new(format!("{}:", tl!("Resolution"))).color(t.text_muted));
+                        ui.label(format!("{res} ppi"));
+                    });
+                }
+                if let Some(text) = &obj.text {
+                    let preview = if text.len() > 50 { format!("{}…", &text[..50]) } else { text.clone() };
+                    ui.label(egui::RichText::new(format!("\"{}\"", preview)).color(t.text_muted).font(theme::regular(11.0)));
+                }
+
+                let (w, h) = (obj.bounds[2] - obj.bounds[0], obj.bounds[3] - obj.bounds[1]);
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(format!("{}:", tl!("Bounds"))).color(t.text_muted));
+                    ui.label(format!("{w:.1} × {h:.1} pt"));
+                });
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(format!("{}:", tl!("Overprint"))).color(t.text_muted));
+                    ui.label(if obj.overprint { tl!("Yes") } else { tl!("No") });
+                });
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(format!("{}:", tl!("Blend Mode"))).color(t.text_muted));
+                    ui.label(&obj.blend_mode);
+                });
+            } else {
+                ui.label(
+                    egui::RichText::new(tl!("Hover over any page element to view its object and color properties."))
+                        .color(t.text_muted)
+                        .font(theme::regular(12.0)),
+                );
+            }
+        });
 }
 
 /// Paint page boxes overlay (ArtBox, TrimBox, BleedBox, CropBox) for Output Preview.
@@ -411,6 +559,22 @@ pub(crate) fn paint_output_preview_boxes(
         let label_pos = r.left_top() + vec2(4.0, 3.0);
         painter.text(label_pos, egui::Align2::LEFT_TOP, label, theme::semibold(10.5), color);
     }
+}
+
+/// Paint inspected object outline for Output Preview Object Inspector.
+pub(crate) fn paint_inspected_object_outline(
+    painter: &egui::Painter,
+    xf: &crate::canvas::PageXform,
+    info: &pdfcraft_render::DocInfo,
+    page: usize,
+    bounds: [f64; 4],
+) {
+    let r = xf.user_rect_f64(info, page, bounds);
+    if !r.is_positive() {
+        return;
+    }
+    let stroke = Stroke::new(2.0, Color32::from_rgb(0, 150, 255));
+    painter.rect_stroke(r, CornerRadius::ZERO, stroke, egui::StrokeKind::Outside);
 }
 
 impl PdfCraftApp {
@@ -480,6 +644,123 @@ impl PdfCraftApp {
         self.output_preview_draft.page_has_transparency = doc.page_uses_transparency(page);
         if let Some(cs) = doc.page_transparency_blending_space(page) {
             self.output_preview_draft.transparency_blending_space = cs;
+        }
+
+        if self.output_preview_draft.preview_mode == "Object Inspector" {
+            let mut best_match: Option<InspectedObject> = None;
+            let mut min_area = f64::MAX;
+
+            for tb in doc.text_blocks(page) {
+                let sr = xf.user_rect_f64(&doc.info, page, tb.rect);
+                if sr.expand(2.0).contains(pos) {
+                    let w = (tb.rect[2] - tb.rect[0]).abs();
+                    let h = (tb.rect[3] - tb.rect[1]).abs();
+                    let area = w * h;
+                    if area < min_area {
+                        min_area = area;
+                        best_match = Some(InspectedObject {
+                            page,
+                            kind: "Text".into(),
+                            bounds: tb.rect,
+                            color_space: "DeviceRGB".into(),
+                            cmyk: (
+                                self.output_preview_draft.sample_cyan,
+                                self.output_preview_draft.sample_magenta,
+                                self.output_preview_draft.sample_yellow,
+                                self.output_preview_draft.sample_black,
+                            ),
+                            font_name: Some(tb.base_font.clone()),
+                            font_size: Some(tb.size),
+                            dimensions: None,
+                            resolution_ppi: None,
+                            overprint: self.output_preview_draft.simulate_overprinting,
+                            blend_mode: "Normal".into(),
+                            text: Some(tb.text.clone()),
+                        });
+                    }
+                }
+            }
+
+            for img in doc.page_images(page) {
+                let r = img.visible_rect.unwrap_or(img.rect);
+                let sr = xf.user_rect_f64(&doc.info, page, r);
+                if sr.expand(2.0).contains(pos) {
+                    let w = (r[2] - r[0]).abs();
+                    let h = (r[3] - r[1]).abs();
+                    let area = w * h;
+                    if area < min_area {
+                        min_area = area;
+                        let ppi = if img.width > 0 && w > 0.0 {
+                            Some(((img.width as f64 * 72.0 / w).round() as u32).max(1))
+                        } else {
+                            None
+                        };
+                        best_match = Some(InspectedObject {
+                            page,
+                            kind: if img.is_form { "Vector Artwork / Form".into() } else { "Image".into() },
+                            bounds: r,
+                            color_space: if img.is_form { "DeviceCMYK".into() } else { "ICCBased (CMYK)".into() },
+                            cmyk: (
+                                self.output_preview_draft.sample_cyan,
+                                self.output_preview_draft.sample_magenta,
+                                self.output_preview_draft.sample_yellow,
+                                self.output_preview_draft.sample_black,
+                            ),
+                            font_name: None,
+                            font_size: None,
+                            dimensions: if img.width > 0 && img.height > 0 { Some((img.width, img.height)) } else { None },
+                            resolution_ppi: ppi,
+                            overprint: false,
+                            blend_mode: "Normal".into(),
+                            text: None,
+                        });
+                    }
+                }
+            }
+
+            if best_match.is_none()
+                && let Ok(objs) = doc.editable_objects(page)
+            {
+                for obj in objs {
+                    let sr = xf.user_rect_f64(&doc.info, page, obj.rect);
+                    if sr.expand(2.0).contains(pos) {
+                        let w = (obj.rect[2] - obj.rect[0]).abs();
+                        let h = (obj.rect[3] - obj.rect[1]).abs();
+                        let area = w * h;
+                        if area < min_area {
+                            min_area = area;
+                            best_match = Some(InspectedObject {
+                                page,
+                                kind: match obj.content_type {
+                                    "image" => "Image".into(),
+                                    "form" => "Vector Artwork / Form".into(),
+                                    "text" => "Text".into(),
+                                    _ => "Page Element".into(),
+                                },
+                                bounds: obj.rect,
+                                color_space: "DeviceCMYK".into(),
+                                cmyk: (
+                                    self.output_preview_draft.sample_cyan,
+                                    self.output_preview_draft.sample_magenta,
+                                    self.output_preview_draft.sample_yellow,
+                                    self.output_preview_draft.sample_black,
+                                ),
+                                font_name: None,
+                                font_size: None,
+                                dimensions: None,
+                                resolution_ppi: None,
+                                overprint: false,
+                                blend_mode: "Normal".into(),
+                                text: obj.text,
+                            });
+                        }
+                    }
+                }
+            }
+
+            self.output_preview_draft.inspected_object = best_match;
+        } else {
+            self.output_preview_draft.inspected_object = None;
         }
     }
 }
@@ -609,5 +890,59 @@ mod tests {
         crate::canvas::apply_output_preview_filter(&mut img_tac, tag_tac);
         // Exceeds 250% coverage -> neon green warning (0, 255, 0)
         assert_eq!(img_tac.pixels[0], Color32::from_rgba_premultiplied(0, 255, 0, 255));
+    }
+
+    #[test]
+    fn color_warnings_filter_and_tags() {
+        let d = OutputPreviewDraft {
+            preview_mode: "Color Warnings".into(),
+            warn_rich_black: true,
+            warn_overprinting: true,
+            total_area_coverage_limit: 280,
+            ..Default::default()
+        };
+
+        let tag = d.filter_tag();
+        assert_ne!(tag & crate::canvas::OP_ACTIVE, 0);
+        assert_ne!(tag & crate::canvas::OP_COLOR_WARNINGS, 0);
+        assert_ne!(tag & crate::canvas::OP_WARN_RICH_BLACK, 0);
+        assert_ne!(tag & crate::canvas::OP_WARN_OVERPRINT, 0);
+        assert_ne!(tag & crate::canvas::OP_TAC_WARN, 0);
+
+        // Rich black pixel (e.g. dark charcoal: r:10, g:10, b:10 -> high K and supporting ink)
+        let mut img_rich = egui::ColorImage::new([1, 1], vec![Color32::from_rgba_premultiplied(10, 10, 10, 255)]);
+        crate::canvas::apply_output_preview_filter(&mut img_rich, tag);
+        // Rich black highlighted in crimson red (204, 0, 0)
+        assert_eq!(img_rich.pixels[0], Color32::from_rgba_premultiplied(204, 0, 0, 255));
+    }
+
+    #[test]
+    fn object_inspector_state() {
+        let mut d = OutputPreviewDraft {
+            preview_mode: "Object Inspector".into(),
+            ..Default::default()
+        };
+        assert!(d.inspected_object.is_none());
+
+        d.inspected_object = Some(InspectedObject {
+            page: 0,
+            kind: "Text".into(),
+            bounds: [50.0, 100.0, 200.0, 120.0],
+            color_space: "DeviceCMYK".into(),
+            cmyk: (0.0, 100.0, 100.0, 0.0),
+            font_name: Some("Helvetica-Bold".into()),
+            font_size: Some(14.0),
+            dimensions: None,
+            resolution_ppi: None,
+            overprint: false,
+            blend_mode: "Normal".into(),
+            text: Some("Heading Text".into()),
+        });
+
+        assert!(d.inspected_object.is_some());
+        let obj = d.inspected_object.as_ref().unwrap();
+        assert_eq!(obj.kind, "Text");
+        assert_eq!(obj.font_name.as_deref(), Some("Helvetica-Bold"));
+        assert_eq!(obj.font_size, Some(14.0));
     }
 }

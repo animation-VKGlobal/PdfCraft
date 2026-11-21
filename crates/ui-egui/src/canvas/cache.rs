@@ -25,8 +25,10 @@ pub(crate) const OP_NO_MAGENTA: u64 = 1 << 55;
 pub(crate) const OP_NO_CYAN: u64 = 1 << 54;
 pub(crate) const OP_TAC_WARN: u64 = 1 << 53;
 pub(crate) const OP_COLOR_WARNINGS: u64 = 1 << 52;
+pub(crate) const OP_WARN_RICH_BLACK: u64 = 1 << 51;
+pub(crate) const OP_WARN_OVERPRINT: u64 = 1 << 50;
 pub(crate) const OP_TAC_LIMIT_MASK: u64 = 0x3FF;
-pub(crate) const OP_TAC_LIMIT_SHIFT: u32 = 42;
+pub(crate) const OP_TAC_LIMIT_SHIFT: u32 = 40;
 
 /// The tag of a raster that is out of date (shown until its replacement arrives).
 pub(super) const STALE_TAG: u64 = u64::MAX;
@@ -980,6 +982,8 @@ pub(crate) fn apply_output_preview_filter(img: &mut egui::ColorImage, tag: u64) 
     let no_k = tag & OP_NO_BLACK != 0;
     let tac_warn = tag & OP_TAC_WARN != 0;
     let color_warn = tag & OP_COLOR_WARNINGS != 0;
+    let warn_rich_black = tag & OP_WARN_RICH_BLACK != 0;
+    let warn_overprint = tag & OP_WARN_OVERPRINT != 0;
     let tac_limit = ((tag >> OP_TAC_LIMIT_SHIFT) & OP_TAC_LIMIT_MASK) as f32;
 
     for chunk in &mut img.pixels {
@@ -998,6 +1002,18 @@ pub(crate) fn apply_output_preview_filter(img: &mut egui::ColorImage, tag: u64) 
         let mut m = ((1.0 - gf) * ucr).clamp(0.0, 1.0);
         let mut y = ((1.0 - bf) * ucr).clamp(0.0, 1.0);
         let mut eff_k = k;
+
+        // Rich Black Warning: highlight in Crimson Red
+        if warn_rich_black && eff_k >= 0.4 && (c > 0.08 || m > 0.08 || y > 0.08) {
+            *chunk = Color32::from_rgba_premultiplied(204, 0, 0, a);
+            continue;
+        }
+
+        // Overprint Warning: highlight overlapping process inks in Amber / Yellow
+        if warn_overprint && ((c > 0.08) as u8 + (m > 0.08) as u8 + (y > 0.08) as u8 + (eff_k > 0.08) as u8) >= 2 {
+            *chunk = Color32::from_rgba_premultiplied(255, 170, 0, a);
+            continue;
+        }
 
         // TAC Warning check: highlight exceeding pixels in neon green (Acrobat default)
         if tac_warn {
