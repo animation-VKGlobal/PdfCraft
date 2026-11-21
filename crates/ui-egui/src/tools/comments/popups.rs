@@ -212,9 +212,16 @@ fn text_box(ui: &mut egui::Ui, parts: &mut Parts<'_>, a: &Annotation, name: &str
         let id_salt = ("popup-text", a.page, a.index);
         let mut bold = a.bold;
         let mut italic = a.italic;
+        let mut styles = parts.cv.popup_styles.get(&key).cloned().unwrap_or_else(|| {
+            let count = text.chars().count();
+            vec![super::state::CharStyle { bold, italic, underline: false, color: None }; count]
+        });
+        super::composer::sync_char_styles(&text, &mut styles, bold, italic);
+        let styles_ref = &styles;
         let mut layouter = |ui: &egui::Ui, text: &dyn egui::TextBuffer, wrap: f32| {
-            super::composer::format_comment_galley(ui, text.as_str(), 12.5, wrap, parts.pal.ink, bold, italic)
+            super::composer::format_comment_galley_styled(ui, text.as_str(), 12.5, wrap, parts.pal.ink, styles_ref, (bold, italic))
         };
+        let field_id = ui.scope_id().with(id_salt);
         let field = ui
             .add(
                 egui::TextEdit::multiline(&mut text)
@@ -228,7 +235,20 @@ fn text_box(ui: &mut egui::Ui, parts: &mut Parts<'_>, a: &Annotation, name: &str
                     .id_salt(id_salt),
             )
             .accessible_name(name);
-        super::composer::format_keys(ui, &field, &mut bold, &mut italic);
+        let mut undo = parts.cv.popup_undo.get(&key).cloned();
+        super::composer::format_editor_keys(ui, &field, &mut text, &mut styles, &mut undo, &mut bold, &mut italic);
+        let mut undo_copy = undo.clone();
+        field.context_menu(|ui| {
+            super::composer::show_comment_text_context_menu(ui, field_id, &mut text, &mut styles, &mut undo_copy, &mut bold, &mut italic);
+        });
+        if undo_copy != undo {
+            if let Some(u) = undo_copy {
+                parts.cv.popup_undo.insert(key, u);
+            } else {
+                parts.cv.popup_undo.remove(&key);
+            }
+        }
+        parts.cv.popup_styles.insert(key, styles);
         if field.changed() {
             parts.cv.popup_text = Some((a.page, a.index, text.clone()));
         }
@@ -274,9 +294,17 @@ fn footer(ui: &mut egui::Ui, parts: &mut Parts<'_>, a: &Annotation) {
     let id_salt = ("popup-reply", a.page, a.index);
     let mut bold = false;
     let mut italic = false;
+    let reply_key = (a.page, a.index + 100_000);
+    let mut styles = parts.cv.popup_styles.get(&reply_key).cloned().unwrap_or_else(|| {
+        let count = reply.chars().count();
+        vec![super::state::CharStyle { bold, italic, underline: false, color: None }; count]
+    });
+    super::composer::sync_char_styles(&reply, &mut styles, bold, italic);
+    let styles_ref = &styles;
     let mut layouter = |ui: &egui::Ui, text: &dyn egui::TextBuffer, wrap: f32| {
-        super::composer::format_comment_galley(ui, text.as_str(), 12.5, wrap, parts.pal.ink, bold, italic)
+        super::composer::format_comment_galley_styled(ui, text.as_str(), 12.5, wrap, parts.pal.ink, styles_ref, (bold, italic))
     };
+    let field_id = ui.scope_id().with(id_salt);
     let field = ui.add(
         egui::TextEdit::multiline(&mut reply)
             .layouter(&mut layouter)
@@ -289,7 +317,20 @@ fn footer(ui: &mut egui::Ui, parts: &mut Parts<'_>, a: &Annotation) {
             .margin(egui::Margin::symmetric(4, 2))
             .id_salt(id_salt),
     );
-    super::composer::format_keys(ui, &field, &mut bold, &mut italic);
+    let mut undo = parts.cv.popup_undo.get(&reply_key).cloned();
+    super::composer::format_editor_keys(ui, &field, &mut reply, &mut styles, &mut undo, &mut bold, &mut italic);
+    let mut undo_copy = undo.clone();
+    field.context_menu(|ui| {
+        super::composer::show_comment_text_context_menu(ui, field_id, &mut reply, &mut styles, &mut undo_copy, &mut bold, &mut italic);
+    });
+    if undo_copy != undo {
+        if let Some(u) = undo_copy {
+            parts.cv.popup_undo.insert(reply_key, u);
+        } else {
+            parts.cv.popup_undo.remove(&reply_key);
+        }
+    }
+    parts.cv.popup_styles.insert(reply_key, styles);
     if opened {
         field.request_focus();
     }

@@ -866,15 +866,15 @@ fn the_edit_composer_shows_while_part_of_its_comment_is_on_screen() {
     let mut h = harness(|app| app.set_option("quick", "square").unwrap());
     drag_pt(&mut h, (20.0, 190.0), (280.0, 10.0));
     // What "Edit text…" opens: the composer anchored at the comment's top-right corner.
-    h.state_mut().views[0].comments.composer = Some(pdfcraft_ui_egui::comments::Composer {
-        page: 0,
-        at: [280.0, 190.0],
-        kind: pdfcraft_ui_egui::comments::ComposerKind::Edit(0),
-        text: String::new(),
-        focus: true,
-        bold: false,
-        italic: false,
-    });
+    h.state_mut().views[0].comments.composer = Some(pdfcraft_ui_egui::comments::Composer::new(
+        0,
+        [280.0, 190.0],
+        pdfcraft_ui_egui::comments::ComposerKind::Edit(0),
+        String::new(),
+        true,
+        false,
+        false,
+    ));
     h.run_steps(2);
     let viewport = h.state().views[0].viewport_rect();
     h.state_mut().views[0].goto = Some((0, 0.4));

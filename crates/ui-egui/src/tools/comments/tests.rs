@@ -708,8 +708,7 @@ fn stale_comment_state_is_cleared_and_delete_never_hits_non_comment_slots() {
     let mut view = DocView::new(pdfcraft_engine::DocId(1), &info, crate::canvas::ViewDefaults::default());
     view.comments.selected = Some((0, 2));
     view.comments.open_editor(0, 2, "draft".into());
-    view.comments.composer =
-        Some(Composer { page: 0, at: [10.0, 10.0], kind: ComposerKind::Edit(2), text: "body".into(), focus: false, bold: false, italic: false });
+    view.comments.composer = Some(Composer::new(0, [10.0, 10.0], ComposerKind::Edit(2), "body".into(), false, false, false));
     view.comments.gesture = Some(Gesture::Move { page: 0, index: 2, from: pos2(0.0, 0.0) });
 
     // Moving/editing in place or appending a comment at index 3 preserves (0, 2) selection/editing/gesture.
@@ -726,8 +725,7 @@ fn stale_comment_state_is_cleared_and_delete_never_hits_non_comment_slots() {
     shifted.annotations = vec![annot(1, "c2")];
     view.comments.selected = Some((0, 1));
     view.comments.open_editor(0, 1, "for c1, not c2".into());
-    view.comments.composer =
-        Some(Composer { page: 0, at: [10.0, 10.0], kind: ComposerKind::Edit(1), text: "for c1".into(), focus: false, bold: false, italic: false });
+    view.comments.composer = Some(Composer::new(0, [10.0, 10.0], ComposerKind::Edit(1), "for c1".into(), false, false, false));
     view.comments.gesture = Some(Gesture::Move { page: 0, index: 1, from: pos2(0.0, 0.0) });
     view.document_changed(&shifted);
     assert_eq!(view.comments.selected, None);
@@ -798,15 +796,7 @@ fn an_unnamed_shift_clears_state_for_the_old_index() {
     let mut view = DocView::new(pdfcraft_engine::DocId(1), &info, crate::canvas::ViewDefaults::default());
     view.comments.selected = Some((0, 1));
     view.comments.open_editor(0, 1, "the first note".into());
-    view.comments.composer = Some(Composer {
-        page: 0,
-        at: [10.0, 10.0],
-        kind: ComposerKind::Edit(1),
-        text: "the first note".into(),
-        focus: false,
-        bold: false,
-        italic: false,
-    });
+    view.comments.composer = Some(Composer::new(0, [10.0, 10.0], ComposerKind::Edit(1), "the first note".into(), false, false, false));
     view.comments.gesture = Some(Gesture::Move { page: 0, index: 1, from: pos2(0.0, 0.0) });
     let mut shifted = info.clone();
     shifted.annotations = vec![annot(1)];
@@ -981,6 +971,68 @@ fn format_comment_galley_applies_bold_and_italic() {
     ctx.run_ui(egui::RawInput::default(), |ui| {
         let g = format_comment_galley(ui, "Clean text", 13.0, 200.0, Color32::BLACK, true, true);
         assert_eq!(g.text(), "Clean text");
+    })
+    .drop_without_applying_deltas();
+}
+
+#[test]
+fn comment_char_styles_selection_and_toggles() {
+    use super::composer::{
+        apply_color_range, clear_formatting_range, format_comment_galley_styled, sync_char_styles, toggle_bold_range, toggle_italic_range,
+        toggle_underline_range,
+    };
+    use super::state::CharStyle;
+
+    let text = "Hello World";
+    let mut styles = Vec::new();
+    sync_char_styles(text, &mut styles, false, false);
+    assert_eq!(styles.len(), 11);
+    assert!(styles.iter().all(|s| !s.bold && !s.italic && !s.underline));
+
+    // Bold selection "Hello" (indices 0..5)
+    let mut default_bold = false;
+    toggle_bold_range(&mut styles, Some((0, 5)), &mut default_bold);
+    assert!(styles[0..5].iter().all(|s| s.bold));
+    assert!(styles[5..11].iter().all(|s| !s.bold));
+    assert!(!default_bold, "default_bold should not change when formatting selection");
+
+    // Italic selection "World" (indices 6..11)
+    let mut default_italic = false;
+    toggle_italic_range(&mut styles, Some((6, 11)), &mut default_italic);
+    assert!(styles[0..5].iter().all(|s| s.bold && !s.italic));
+    assert!(styles[6..11].iter().all(|s| !s.bold && s.italic));
+
+    // Underline selection "lo Wo" (indices 3..8)
+    toggle_underline_range(&mut styles, Some((3, 8)));
+    assert!(styles[3..8].iter().all(|s| s.underline));
+    assert!(!styles[0].underline && !styles[10].underline);
+
+    // Color selection "Hello"
+    let red = Color32::from_rgb(255, 0, 0);
+    apply_color_range(&mut styles, Some((0, 5)), Some(red));
+    assert_eq!(styles[0].color, Some(red));
+    assert_eq!(styles[6].color, None);
+
+    // Clear formatting for selection "Hello"
+    clear_formatting_range(&mut styles, Some((0, 5)), &mut default_bold, &mut default_italic);
+    assert_eq!(styles[0], CharStyle::default());
+    // "World" still keeps italic
+    assert!(styles[10].italic);
+
+    // Clear all formatting
+    clear_formatting_range(&mut styles, None, &mut default_bold, &mut default_italic);
+    assert!(styles.iter().all(|s| *s == CharStyle::default()));
+
+    // Toggle bold on all when no selection
+    toggle_bold_range(&mut styles, None, &mut default_bold);
+    assert!(default_bold);
+    assert!(styles.iter().all(|s| s.bold));
+
+    // Render styled galley without error
+    let ctx = egui::Context::default();
+    ctx.run_ui(egui::RawInput::default(), |ui| {
+        let g = format_comment_galley_styled(ui, text, 13.0, 200.0, Color32::BLACK, &styles, (false, false));
+        assert_eq!(g.text(), "Hello World");
     })
     .drop_without_applying_deltas();
 }

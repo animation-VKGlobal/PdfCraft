@@ -64,6 +64,15 @@ pub enum ComposerKind {
     Edit(usize),
 }
 
+/// Individual character visual styling inside comment text boxes.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct CharStyle {
+    pub bold: bool,
+    pub italic: bool,
+    pub underline: bool,
+    pub color: Option<egui::Color32>,
+}
+
 /// The floating "Add a comment" card.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Composer {
@@ -75,6 +84,16 @@ pub struct Composer {
     pub focus: bool,
     pub bold: bool,
     pub italic: bool,
+    pub styles: Vec<CharStyle>,
+    pub undo_text: Option<(String, Vec<CharStyle>)>,
+}
+
+impl Composer {
+    pub fn new(page: usize, at: [f64; 2], kind: ComposerKind, text: String, focus: bool, bold: bool, italic: bool) -> Self {
+        let count = text.chars().count();
+        let default_style = CharStyle { bold, italic, underline: false, color: None };
+        Self { page, at, kind, text, focus, bold, italic, styles: vec![default_style; count], undo_text: None }
+    }
 }
 
 /// A released drawing gesture waiting for the page raster to show its annotation.
@@ -176,6 +195,10 @@ pub struct CommentView {
     pub popup_resize: Option<(usize, usize, egui::Vec2)>,
     /// Text being typed in a pop-up window: (page, index, text).
     pub popup_text: Option<(usize, usize, String)>,
+    /// Character formatting styles for each popup comment text box: (page, index) -> styles
+    pub popup_styles: HashMap<(usize, usize), Vec<CharStyle>>,
+    /// Previous text and styles snapshot for Undo Text Change in popup: (page, index) -> (text, styles)
+    pub popup_undo: HashMap<(usize, usize), (String, Vec<CharStyle>)>,
     /// A reply being typed in a pop-up window: the comment or reply it answers (page, index), and its text.
     pub popup_reply: Option<(usize, usize, String)>,
     /// Where each open pop-up was drawn last frame, for the connector lines and hit-testing.

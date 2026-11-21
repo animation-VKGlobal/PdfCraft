@@ -356,15 +356,15 @@ fn select_input(
             }
             return true;
         }
-        cv.composer = Some(Composer {
-            page: cx.page,
-            at: edit_anchor(cx.info, a),
-            kind: ComposerKind::Edit(a.index),
-            text: a.contents.clone().unwrap_or_default(),
-            focus: true,
-            bold: a.bold,
-            italic: a.italic,
-        });
+        cv.composer = Some(Composer::new(
+            cx.page,
+            edit_anchor(cx.info, a),
+            ComposerKind::Edit(a.index),
+            a.contents.clone().unwrap_or_default(),
+            true,
+            a.bold,
+            a.italic,
+        ));
         consumed = true;
     }
     consumed
@@ -442,8 +442,7 @@ pub(crate) fn page_after_text(resp: &egui::Response, cx: &PageCx<'_>, view: &mut
             let last = quads.last().copied().unwrap_or_default();
             let at = [last[2].max(last[6]), last[1].max(last[3])];
             view.comments.replace = Some(quads);
-            view.comments.composer =
-                Some(Composer { page, at, kind: ComposerKind::Replace, text: String::new(), focus: true, bold: false, italic: false });
+            view.comments.composer = Some(Composer::new(page, at, ComposerKind::Replace, String::new(), true, false, false));
         }
         return;
     }
@@ -658,8 +657,7 @@ impl Gestures<'_> {
             if let [point, at] = points[..]
                 && (point[0] - at[0]).hypot(point[1] - at[1]) >= 8.0
             {
-                cv.composer =
-                    Some(Composer { page, at, kind: ComposerKind::Callout { point }, text: String::new(), focus: true, bold: false, italic: false });
+                cv.composer = Some(Composer::new(page, at, ComposerKind::Callout { point }, String::new(), true, false, false));
             }
         }
         true
@@ -700,15 +698,7 @@ impl Gestures<'_> {
             let (vx, vy) = cx.xf.screen_to_view(p);
             let snapped = cx.info.pages.get(cx.page).zip(caret_text).and_then(|(page, t)| snapped_caret(page, t, vx, vy));
             let (at, size) = snapped.unwrap_or_else(|| (cx.to_user(p), CARET_SIZE));
-            cv.composer = Some(Composer {
-                page: cx.page,
-                at,
-                kind: ComposerKind::Caret { size },
-                text: String::new(),
-                focus: true,
-                bold: false,
-                italic: false,
-            });
+            cv.composer = Some(Composer::new(cx.page, at, ComposerKind::Caret { size }, String::new(), true, false, false));
             cv.select(None);
         }
         true
@@ -751,15 +741,7 @@ impl Gestures<'_> {
                     let drawn =
                         (r.width() >= 6.0 && r.height() >= 6.0).then(|| cx.info.pages.get(page)).flatten().map(|p| drawn_box(p, *first, *last));
                     let (at, size) = drawn.map_or((*first, None), |(at, size)| (at, Some(size)));
-                    cv.composer = Some(Composer {
-                        page,
-                        at,
-                        kind: ComposerKind::TextBox { size },
-                        text: String::new(),
-                        focus: true,
-                        bold: false,
-                        italic: false,
-                    });
+                    cv.composer = Some(Composer::new(page, at, ComposerKind::TextBox { size }, String::new(), true, false, false));
                 }
             }
         }
@@ -768,7 +750,7 @@ impl Gestures<'_> {
             && let Some(p) = pointer
         {
             let kind = if tool == CommentTool::Note { ComposerKind::Note } else { ComposerKind::TextBox { size: None } };
-            cv.composer = Some(Composer { page: cx.page, at: cx.to_user(p), kind, text: String::new(), focus: true, bold: false, italic: false });
+            cv.composer = Some(Composer::new(cx.page, cx.to_user(p), kind, String::new(), true, false, false));
             cv.select(None);
         }
         true

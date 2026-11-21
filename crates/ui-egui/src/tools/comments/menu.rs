@@ -74,15 +74,15 @@ pub(crate) fn context_menu(
             let (page, index) = (a.page, a.index);
             attachment_items(ui, view, info, a);
             if ui.add_enabled(allowed, egui::Button::new(tl!("Edit text…"))).clicked() {
-                view.comments.composer = Some(Composer {
+                view.comments.composer = Some(Composer::new(
                     page,
-                    at: edit_anchor(info, a),
-                    kind: ComposerKind::Edit(index),
-                    text: a.contents.clone().unwrap_or_default(),
-                    focus: true,
-                    bold: a.bold,
-                    italic: a.italic,
-                });
+                    edit_anchor(info, a),
+                    ComposerKind::Edit(index),
+                    a.contents.clone().unwrap_or_default(),
+                    true,
+                    a.bold,
+                    a.italic,
+                ));
                 ui.close();
             }
             if ui.add_enabled(allowed, egui::Button::new(tl!("Reply"))).clicked() {
@@ -166,8 +166,7 @@ pub(crate) fn context_menu(
             if let Some((page, at)) = view.comments.context_at
                 && ui.add_enabled(allowed, egui::Button::new(tl!("Add a sticky note here"))).clicked()
             {
-                view.comments.composer =
-                    Some(Composer { page, at, kind: ComposerKind::Note, text: String::new(), focus: true, bold: false, italic: false });
+                view.comments.composer = Some(Composer::new(page, at, ComposerKind::Note, String::new(), true, false, false));
                 ui.close();
             }
             if ui.button(tl!("Comments panel")).clicked() {

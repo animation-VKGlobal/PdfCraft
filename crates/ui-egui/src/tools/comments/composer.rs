@@ -1,6 +1,6 @@
 use super::geometry::{drawn_text_box_rect, page_rotation, text_box_rect};
 use super::paint::{edited_in_view, new_comment_styled};
-use super::state::{ComposerKind, PageCx};
+use super::state::{CharStyle, ComposerKind, PageCx};
 use super::{
     Color32, CommentPrefs, CommentTool, CornerRadius, DocInfo, DocView, Edit, LineEnding, Markup, NoteIcon, PagePointer, QuickTool, Shape, Tokens,
     pos2, theme,
@@ -62,6 +62,8 @@ pub(crate) fn composer(ctx: &egui::Context, keys: PageKeys, view: &mut DocView, 
     area.fixed_pos(pos).show(ctx, |ui| {
         egui::Frame::popup(ui.style()).inner_margin(egui::Margin::same(12)).corner_radius(CornerRadius::same(8)).show(ui, |ui| {
             ui.set_width(260.0);
+            let text_id = ui.scope_id().with("composer-text");
+            sync_char_styles(&c.text, &mut c.styles, c.bold, c.italic);
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new(prefs.author.clone()).font(theme::semibold(13.0)));
                 ui.label(egui::RichText::new(tl!(title)).font(theme::regular(11.5)).color(t.text_faint));
@@ -71,14 +73,18 @@ pub(crate) fn composer(ctx: &egui::Context, keys: PageKeys, view: &mut DocView, 
                         .fill(if c.italic { t.accent.gamma_multiply(0.2) } else { Color32::TRANSPARENT })
                         .stroke(if c.italic { egui::Stroke::new(1.0, t.accent) } else { egui::Stroke::NONE });
                     if ui.add(btn_i).on_hover_text(tl!("Italic (Ctrl+I)")).clicked() {
-                        c.italic = !c.italic;
+                        let sel = get_text_selection(ui.ctx(), text_id);
+                        c.undo_text = Some((c.text.clone(), c.styles.clone()));
+                        toggle_italic_range(&mut c.styles, sel, &mut c.italic);
                     }
                     let btn_b = egui::Button::new(egui::RichText::new("B").font(theme::semibold(12.0)))
                         .min_size(egui::vec2(22.0, 20.0))
                         .fill(if c.bold { t.accent.gamma_multiply(0.2) } else { Color32::TRANSPARENT })
                         .stroke(if c.bold { egui::Stroke::new(1.0, t.accent) } else { egui::Stroke::NONE });
                     if ui.add(btn_b).on_hover_text(tl!("Bold (Ctrl+B)")).clicked() {
-                        c.bold = !c.bold;
+                        let sel = get_text_selection(ui.ctx(), text_id);
+                        c.undo_text = Some((c.text.clone(), c.styles.clone()));
+                        toggle_bold_range(&mut c.styles, sel, &mut c.bold);
                     }
                 });
             });
@@ -89,10 +95,10 @@ pub(crate) fn composer(ctx: &egui::Context, keys: PageKeys, view: &mut DocView, 
                 ComposerKind::Replace => tl!("Replacement text"),
                 _ => tl!("Add a comment"),
             };
-            let text_id = ui.scope_id().with("composer-text");
             let (is_bold, is_italic) = (c.bold, c.italic);
+            let styles_ref = &c.styles;
             let mut layouter = move |ui: &egui::Ui, text: &dyn egui::TextBuffer, wrap: f32| {
-                format_comment_galley(ui, text.as_str(), 13.0, wrap, t.text, is_bold, is_italic)
+                format_comment_galley_styled(ui, text.as_str(), 13.0, wrap, t.text, styles_ref, (is_bold, is_italic))
             };
             let edit = ui
                 .add(
@@ -109,7 +115,11 @@ pub(crate) fn composer(ctx: &egui::Context, keys: PageKeys, view: &mut DocView, 
                 edit.request_focus();
                 c.focus = false;
             }
-            format_keys(ui, &edit, &mut c.bold, &mut c.italic);
+            format_editor_keys(ui, &edit, &mut c.text, &mut c.styles, &mut c.undo_text, &mut c.bold, &mut c.italic);
+            let (c_text, c_styles, c_undo, c_bold, c_italic) = (&mut c.text, &mut c.styles, &mut c.undo_text, &mut c.bold, &mut c.italic);
+            edit.context_menu(|ui| {
+                show_comment_text_context_menu(ui, text_id, c_text, c_styles, c_undo, c_bold, c_italic);
+            });
             let enter = submit_key(ui, &edit, false);
             if keys.pressed(ui.ctx(), egui::Key::Escape) {
                 cancel = true;
@@ -142,7 +152,7 @@ pub(crate) fn composer(ctx: &egui::Context, keys: PageKeys, view: &mut DocView, 
     if !post {
         return None;
     }
-    let (bold, italic) = (c.bold, c.italic);
+    let (bold, italic) = (c.bold || c.styles.iter().any(|s| s.bold), c.italic || c.styles.iter().any(|s| s.italic));
     let c = view.comments.composer.take()?;
     let typewriter_edit = matches!(c.kind, ComposerKind::Edit(index) if info.annotations.iter().any(|a|
         a.page == page && a.index == index && a.subtype == "FreeText" && a.intent.as_deref() == Some("FreeTextTypeWriter")
@@ -237,6 +247,326 @@ pub(crate) fn submit_key(ui: &mut egui::Ui, field: &egui::Response, plain_enter:
         })
 }
 
+/// Sync character styling vector length to match the character count of `text`.
+pub(crate) fn sync_char_styles(text: &str, styles: &mut Vec<CharStyle>, default_bold: bool, default_italic: bool) {
+    let char_count = text.chars().count();
+    let def = CharStyle { bold: default_bold, italic: default_italic, underline: false, color: None };
+    if styles.len() < char_count {
+        let last = styles.last().copied().unwrap_or(def);
+        styles.resize(char_count, last);
+    } else if styles.len() > char_count {
+        styles.truncate(char_count);
+    }
+}
+
+/// Retrieve the active character selection range (start, end) in an egui TextEdit.
+pub(crate) fn get_text_selection(ctx: &egui::Context, id: egui::Id) -> Option<(usize, usize)> {
+    let state = egui::TextEdit::load_state(ctx, id)?;
+    let range = state.cursor.char_range()?;
+    let sorted = range.as_sorted_char_range();
+    if !sorted.is_empty() { Some((sorted.start.into(), sorted.end.into())) } else { None }
+}
+
+/// Select a range of characters in an egui TextEdit.
+pub(crate) fn reselect_range(ctx: &egui::Context, id: egui::Id, start: usize, end: usize) {
+    if let Some(mut state) = egui::TextEdit::load_state(ctx, id) {
+        state.cursor.set_char_range(Some(egui::text::CCursorRange::two(egui::text::CCursor::new(start), egui::text::CCursor::new(end))));
+        state.store(ctx, id);
+    }
+}
+
+/// Move the caret in an egui TextEdit.
+pub(crate) fn reposition_cursor(ctx: &egui::Context, id: egui::Id, pos: usize) {
+    if let Some(mut state) = egui::TextEdit::load_state(ctx, id) {
+        state.cursor.set_char_range(Some(egui::text::CCursorRange::one(egui::text::CCursor::new(pos))));
+        state.store(ctx, id);
+    }
+}
+
+/// Toggle bold on the selected character range (or all if no selection).
+pub(crate) fn toggle_bold_range(styles: &mut [CharStyle], selection: Option<(usize, usize)>, default_bold: &mut bool) {
+    if let Some((start, end)) = selection {
+        let slice = styles.get_mut(start..end.min(styles.len())).unwrap_or(&mut []);
+        if !slice.is_empty() {
+            let all_bold = slice.iter().all(|s| s.bold);
+            for s in slice.iter_mut() {
+                s.bold = !all_bold;
+            }
+            return;
+        }
+    }
+    *default_bold = !*default_bold;
+    for s in styles.iter_mut() {
+        s.bold = *default_bold;
+    }
+}
+
+/// Toggle italic on the selected character range (or all if no selection).
+pub(crate) fn toggle_italic_range(styles: &mut [CharStyle], selection: Option<(usize, usize)>, default_italic: &mut bool) {
+    if let Some((start, end)) = selection {
+        let slice = styles.get_mut(start..end.min(styles.len())).unwrap_or(&mut []);
+        if !slice.is_empty() {
+            let all_italic = slice.iter().all(|s| s.italic);
+            for s in slice.iter_mut() {
+                s.italic = !all_italic;
+            }
+            return;
+        }
+    }
+    *default_italic = !*default_italic;
+    for s in styles.iter_mut() {
+        s.italic = *default_italic;
+    }
+}
+
+/// Toggle underline on the selected character range (or all if no selection).
+pub(crate) fn toggle_underline_range(styles: &mut [CharStyle], selection: Option<(usize, usize)>) {
+    if let Some((start, end)) = selection {
+        let slice = styles.get_mut(start..end.min(styles.len())).unwrap_or(&mut []);
+        if !slice.is_empty() {
+            let all_underlined = slice.iter().all(|s| s.underline);
+            for s in slice.iter_mut() {
+                s.underline = !all_underlined;
+            }
+            return;
+        }
+    }
+    let all_underlined = !styles.is_empty() && styles.iter().all(|s| s.underline);
+    for s in styles.iter_mut() {
+        s.underline = !all_underlined;
+    }
+}
+
+/// Clear all formatting on the selected character range (or all if no selection).
+pub(crate) fn clear_formatting_range(
+    styles: &mut [CharStyle],
+    selection: Option<(usize, usize)>,
+    default_bold: &mut bool,
+    default_italic: &mut bool,
+) {
+    if let Some((start, end)) = selection {
+        let slice = styles.get_mut(start..end.min(styles.len())).unwrap_or(&mut []);
+        for s in slice.iter_mut() {
+            *s = CharStyle::default();
+        }
+        return;
+    }
+    *default_bold = false;
+    *default_italic = false;
+    for s in styles.iter_mut() {
+        *s = CharStyle::default();
+    }
+}
+
+/// Apply a color to the selected character range (or all if no selection).
+pub(crate) fn apply_color_range(styles: &mut [CharStyle], selection: Option<(usize, usize)>, color: Option<Color32>) {
+    if let Some((start, end)) = selection {
+        let slice = styles.get_mut(start..end.min(styles.len())).unwrap_or(&mut []);
+        for s in slice.iter_mut() {
+            s.color = color;
+        }
+        return;
+    }
+    for s in styles.iter_mut() {
+        s.color = color;
+    }
+}
+
+/// Toggle superscript or subscript on the selected character range (or all of text).
+pub(crate) fn apply_script_range(
+    ctx: &egui::Context,
+    field_id: egui::Id,
+    text: &mut String,
+    styles: &mut Vec<CharStyle>,
+    selection: Option<(usize, usize)>,
+    script: pdfcraft_engine::text_script::Script,
+    fallback: (bool, bool),
+) {
+    let byte_range = selection.map(|(start, end)| {
+        let b_start = text.char_indices().nth(start).map_or(text.len(), |(b, _)| b);
+        let b_end = text.char_indices().nth(end).map_or(text.len(), |(b, _)| b);
+        b_start..b_end
+    });
+    if let Some((new_text, new_range)) = pdfcraft_engine::text_script::toggle(text, byte_range.as_ref(), script) {
+        *text = new_text;
+        sync_char_styles(text, styles, fallback.0, fallback.1);
+        let new_char_start = text.get(..new_range.start).map_or(0, |s| s.chars().count());
+        let new_char_end = text.get(..new_range.end).map_or(0, |s| s.chars().count());
+        reselect_range(ctx, field_id, new_char_start, new_char_end);
+    }
+}
+
+/// Right-click context menu for comment text editors matching Acrobat's text options.
+pub(crate) fn show_comment_text_context_menu(
+    ui: &mut egui::Ui,
+    field_id: egui::Id,
+    text: &mut String,
+    styles: &mut Vec<CharStyle>,
+    undo: &mut Option<(String, Vec<CharStyle>)>,
+    default_bold: &mut bool,
+    default_italic: &mut bool,
+) {
+    ui.set_min_width(170.0);
+    let selection = get_text_selection(ui.ctx(), field_id);
+    let has_selection = selection.is_some();
+    let can_undo = undo.is_some();
+
+    if ui.add_enabled(can_undo, egui::Button::new(tl!("Undo Text Change"))).clicked() {
+        if let Some((prev_text, prev_styles)) = undo.take() {
+            *text = prev_text;
+            *styles = prev_styles;
+        }
+        ui.close();
+    }
+    ui.separator();
+
+    if ui.add_enabled(has_selection, egui::Button::new(tl!("Cut Text"))).clicked() {
+        if let Some((start, end)) = selection {
+            *undo = Some((text.clone(), styles.clone()));
+            let chars: Vec<char> = text.chars().collect();
+            if start < chars.len() && end <= chars.len() && start < end {
+                let cut_text: String = chars[start..end].iter().collect();
+                ui.ctx().copy_text(cut_text);
+                let mut new_chars = Vec::with_capacity(chars.len());
+                new_chars.extend_from_slice(&chars[..start]);
+                new_chars.extend_from_slice(&chars[end..]);
+                *text = new_chars.into_iter().collect();
+                if start < styles.len() && end <= styles.len() {
+                    styles.drain(start..end);
+                }
+                reposition_cursor(ui.ctx(), field_id, start);
+            }
+        }
+        ui.close();
+    }
+
+    if ui.add_enabled(has_selection, egui::Button::new(tl!("Copy Text"))).clicked() {
+        if let Some((start, end)) = selection {
+            let chars: Vec<char> = text.chars().collect();
+            if start < chars.len() && end <= chars.len() && start < end {
+                let copy_text: String = chars[start..end].iter().collect();
+                ui.ctx().copy_text(copy_text);
+            }
+        }
+        ui.close();
+    }
+
+    let clip_text = crate::os_clipboard::with(|cb| cb.get_text()).ok().filter(|s| !s.is_empty());
+    let can_paste = clip_text.is_some();
+    if ui.add_enabled(can_paste, egui::Button::new(tl!("Paste Text"))).clicked() {
+        if let Some(pasted) = clip_text {
+            *undo = Some((text.clone(), styles.clone()));
+            let pasted_chars: Vec<char> = pasted.chars().collect();
+            let chars: Vec<char> = text.chars().collect();
+            let (start, end) = selection.unwrap_or_else(|| {
+                let pos = egui::TextEdit::load_state(ui.ctx(), field_id)
+                    .and_then(|s| s.cursor.char_range())
+                    .map_or(chars.len(), |r| r.primary.index.into());
+                (pos.min(chars.len()), pos.min(chars.len()))
+            });
+            let inherit_style =
+                styles.get(start).copied().unwrap_or(CharStyle { bold: *default_bold, italic: *default_italic, underline: false, color: None });
+            let mut new_chars = Vec::with_capacity(chars.len() + pasted_chars.len());
+            new_chars.extend_from_slice(&chars[..start]);
+            new_chars.extend_from_slice(&pasted_chars);
+            if end < chars.len() {
+                new_chars.extend_from_slice(&chars[end..]);
+            }
+            *text = new_chars.into_iter().collect();
+            if start <= styles.len() {
+                let remove_end = end.min(styles.len());
+                styles.drain(start..remove_end);
+                let insert_styles = vec![inherit_style; pasted_chars.len()];
+                styles.splice(start..start, insert_styles);
+            }
+            reposition_cursor(ui.ctx(), field_id, start + pasted_chars.len());
+        }
+        ui.close();
+    }
+
+    if ui.add_enabled(has_selection, egui::Button::new(tl!("Delete Text"))).clicked() {
+        if let Some((start, end)) = selection {
+            *undo = Some((text.clone(), styles.clone()));
+            let chars: Vec<char> = text.chars().collect();
+            if start < chars.len() && end <= chars.len() && start < end {
+                let mut new_chars = Vec::with_capacity(chars.len());
+                new_chars.extend_from_slice(&chars[..start]);
+                new_chars.extend_from_slice(&chars[end..]);
+                *text = new_chars.into_iter().collect();
+                if start < styles.len() && end <= styles.len() {
+                    styles.drain(start..end);
+                }
+                reposition_cursor(ui.ctx(), field_id, start);
+            }
+        }
+        ui.close();
+    }
+
+    ui.separator();
+    ui.add_enabled(false, egui::Button::new(tl!("Check Spelling")));
+    ui.separator();
+
+    ui.menu_button(tl!("Text Style"), |ui| {
+        ui.set_min_width(170.0);
+        if ui.button(tl!("Bold\tCtrl+B")).clicked() {
+            *undo = Some((text.clone(), styles.clone()));
+            toggle_bold_range(styles, selection, default_bold);
+            ui.close();
+        }
+        if ui.button(tl!("Italic\tCtrl+I")).clicked() {
+            *undo = Some((text.clone(), styles.clone()));
+            toggle_italic_range(styles, selection, default_italic);
+            ui.close();
+        }
+        if ui.button(tl!("Underline\tCtrl+U")).clicked() {
+            *undo = Some((text.clone(), styles.clone()));
+            toggle_underline_range(styles, selection);
+            ui.close();
+        }
+        if ui.button(tl!("Superscript\tShift+Ctrl+Plus")).clicked() {
+            *undo = Some((text.clone(), styles.clone()));
+            apply_script_range(
+                ui.ctx(),
+                field_id,
+                text,
+                styles,
+                selection,
+                pdfcraft_engine::text_script::Script::Super,
+                (*default_bold, *default_italic),
+            );
+            ui.close();
+        }
+        if ui.button(tl!("Subscript\tCtrl+Plus")).clicked() {
+            *undo = Some((text.clone(), styles.clone()));
+            apply_script_range(
+                ui.ctx(),
+                field_id,
+                text,
+                styles,
+                selection,
+                pdfcraft_engine::text_script::Script::Sub,
+                (*default_bold, *default_italic),
+            );
+            ui.close();
+        }
+        ui.separator();
+        if ui.button(tl!("Clear Formatting")).clicked() {
+            *undo = Some((text.clone(), styles.clone()));
+            clear_formatting_range(styles, selection, default_bold, default_italic);
+            ui.close();
+        }
+    });
+
+    ui.menu_button(tl!("Text Color"), |ui| {
+        if let Some(rgb) = crate::comments::swatch_grid(ui, None) {
+            *undo = Some((text.clone(), styles.clone()));
+            let color = Color32::from_rgb((rgb[0] * 255.0) as u8, (rgb[1] * 255.0) as u8, (rgb[2] * 255.0) as u8);
+            apply_color_range(styles, selection, Some(color));
+            ui.close();
+        }
+    });
+}
+
 /// Handle bold (Ctrl/Cmd+B) and italic (Ctrl/Cmd+I) shortcuts for comment editors.
 pub(crate) fn format_keys(ui: &mut egui::Ui, field: &egui::Response, bold: &mut bool, italic: &mut bool) {
     if !field.has_focus() {
@@ -268,6 +598,80 @@ pub(crate) fn format_keys(ui: &mut egui::Ui, field: &egui::Response, bold: &mut 
     }
 }
 
+/// Handle full keyboard formatting shortcuts (Ctrl+B, Ctrl+I, Ctrl+U, Shift+Ctrl+Plus, Ctrl+Plus)
+/// for comment editors with selection awareness.
+pub(crate) fn format_editor_keys(
+    ui: &mut egui::Ui,
+    field: &egui::Response,
+    text: &mut String,
+    styles: &mut Vec<CharStyle>,
+    undo: &mut Option<(String, Vec<CharStyle>)>,
+    bold: &mut bool,
+    italic: &mut bool,
+) {
+    if !field.has_focus() {
+        return;
+    }
+    let mut toggle_bold = false;
+    let mut toggle_italic = false;
+    let mut toggle_underline = false;
+    let mut toggle_super = false;
+    let mut toggle_sub = false;
+
+    ui.input_mut(|input| {
+        input.events.retain(|event| {
+            if let egui::Event::Key { key, pressed: true, modifiers, .. } = event {
+                let cmd_or_ctrl = (modifiers.command || modifiers.ctrl) && !modifiers.alt;
+                if cmd_or_ctrl && !modifiers.shift {
+                    if *key == egui::Key::B {
+                        toggle_bold = true;
+                        return false;
+                    }
+                    if *key == egui::Key::I {
+                        toggle_italic = true;
+                        return false;
+                    }
+                    if *key == egui::Key::U {
+                        toggle_underline = true;
+                        return false;
+                    }
+                    if *key == egui::Key::Plus || *key == egui::Key::Equals {
+                        toggle_sub = true;
+                        return false;
+                    }
+                }
+                if cmd_or_ctrl && modifiers.shift && (*key == egui::Key::Plus || *key == egui::Key::Equals) {
+                    toggle_super = true;
+                    return false;
+                }
+            }
+            true
+        });
+    });
+
+    let selection = get_text_selection(ui.ctx(), field.id);
+    if toggle_bold {
+        *undo = Some((text.clone(), styles.clone()));
+        toggle_bold_range(styles, selection, bold);
+    }
+    if toggle_italic {
+        *undo = Some((text.clone(), styles.clone()));
+        toggle_italic_range(styles, selection, italic);
+    }
+    if toggle_underline {
+        *undo = Some((text.clone(), styles.clone()));
+        toggle_underline_range(styles, selection);
+    }
+    if toggle_super {
+        *undo = Some((text.clone(), styles.clone()));
+        apply_script_range(ui.ctx(), field.id, text, styles, selection, pdfcraft_engine::text_script::Script::Super, (*bold, *italic));
+    }
+    if toggle_sub {
+        *undo = Some((text.clone(), styles.clone()));
+        apply_script_range(ui.ctx(), field.id, text, styles, selection, pdfcraft_engine::text_script::Script::Sub, (*bold, *italic));
+    }
+}
+
 /// Render comment text in TextEdit with visual bold (semibold) and italic styling.
 pub(crate) fn format_comment_galley(
     ui: &egui::Ui,
@@ -278,9 +682,41 @@ pub(crate) fn format_comment_galley(
     bold: bool,
     italic: bool,
 ) -> std::sync::Arc<egui::Galley> {
+    format_comment_galley_styled(ui, text, font_size, wrap_width, text_color, &[], (bold, italic))
+}
+
+/// Render comment text in TextEdit with fine-grained per-character visual styling (bold, italic, underline, color).
+pub(crate) fn format_comment_galley_styled(
+    ui: &egui::Ui,
+    text: &str,
+    font_size: f32,
+    wrap_width: f32,
+    text_color: Color32,
+    styles: &[CharStyle],
+    fallback: (bool, bool),
+) -> std::sync::Arc<egui::Galley> {
     let mut job = egui::text::LayoutJob::default();
     job.wrap.max_width = wrap_width;
-    let font_id = if bold { theme::semibold(font_size) } else { theme::regular(font_size) };
-    job.append(text, 0.0, egui::TextFormat { font_id, color: text_color, italics: italic, ..Default::default() });
+    if text.is_empty() {
+        return ui.painter().layout_job(job);
+    }
+    let chars: Vec<char> = text.chars().collect();
+    let mut i = 0;
+    while i < chars.len() {
+        let st = styles.get(i).copied().unwrap_or(CharStyle { bold: fallback.0, italic: fallback.1, underline: false, color: None });
+        let mut run = String::new();
+        while i < chars.len() {
+            let next_st = styles.get(i).copied().unwrap_or(CharStyle { bold: fallback.0, italic: fallback.1, underline: false, color: None });
+            if next_st != st {
+                break;
+            }
+            run.push(chars[i]);
+            i += 1;
+        }
+        let font_id = if st.bold { theme::semibold(font_size) } else { theme::regular(font_size) };
+        let color = st.color.unwrap_or(text_color);
+        let underline = if st.underline { egui::Stroke::new(1.0, color) } else { egui::Stroke::NONE };
+        job.append(&run, 0.0, egui::TextFormat { font_id, color, italics: st.italic, underline, ..Default::default() });
+    }
     ui.painter().layout_job(job)
 }

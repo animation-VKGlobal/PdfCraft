@@ -327,12 +327,9 @@ pub fn show(app: &mut PdfCraftApp, ctx: &egui::Context) {
 
 fn show_separations_panel(ui: &mut egui::Ui, d: &mut OutputPreviewDraft, t: &Tokens) {
     ui.label(egui::RichText::new(tl!("Separations")).font(theme::semibold(13.0)));
-    egui::Frame::NONE
-        .fill(t.field)
-        .stroke(Stroke::new(1.0, t.border))
-        .corner_radius(CornerRadius::same(4))
-        .inner_margin(egui::Margin::same(8))
-        .show(ui, |ui| {
+    egui::Frame::NONE.fill(t.field).stroke(Stroke::new(1.0, t.border)).corner_radius(CornerRadius::same(4)).inner_margin(egui::Margin::same(8)).show(
+        ui,
+        |ui| {
             ui.set_width(ui.available_width());
 
             // Process Plates master row
@@ -374,17 +371,15 @@ fn show_separations_panel(ui: &mut egui::Ui, d: &mut OutputPreviewDraft, t: &Tok
                     ui.label(egui::RichText::new(format!("{total:.0}%")).font(theme::semibold(12.0)));
                 });
             });
-        });
+        },
+    );
 }
 
 fn show_color_warnings_panel(ui: &mut egui::Ui, d: &mut OutputPreviewDraft, t: &Tokens) {
     ui.label(egui::RichText::new(tl!("Color Warnings")).font(theme::semibold(13.0)));
-    egui::Frame::NONE
-        .fill(t.field)
-        .stroke(Stroke::new(1.0, t.border))
-        .corner_radius(CornerRadius::same(4))
-        .inner_margin(egui::Margin::same(8))
-        .show(ui, |ui| {
+    egui::Frame::NONE.fill(t.field).stroke(Stroke::new(1.0, t.border)).corner_radius(CornerRadius::same(4)).inner_margin(egui::Margin::same(8)).show(
+        ui,
+        |ui| {
             ui.set_width(ui.available_width());
             ui.horizontal(|ui| {
                 ui.add(widgets::checkbox(&mut d.warn_overprinting, tl!("Show Overprinting")));
@@ -401,16 +396,14 @@ fn show_color_warnings_panel(ui: &mut egui::Ui, d: &mut OutputPreviewDraft, t: &
                 color_swatch(ui, Color32::from_rgb(0, 255, 0));
                 ui.add(egui::DragValue::new(&mut d.total_area_coverage_limit).range(100..=400).suffix("%"));
             });
-        });
+        },
+    );
     ui.add_space(6.0);
 
     // Live ink readouts under the cursor
-    egui::Frame::NONE
-        .fill(t.field)
-        .stroke(Stroke::new(1.0, t.border))
-        .corner_radius(CornerRadius::same(4))
-        .inner_margin(egui::Margin::same(8))
-        .show(ui, |ui| {
+    egui::Frame::NONE.fill(t.field).stroke(Stroke::new(1.0, t.border)).corner_radius(CornerRadius::same(4)).inner_margin(egui::Margin::same(8)).show(
+        ui,
+        |ui| {
             ui.set_width(ui.available_width());
             let items = [
                 (tl!("Process Cyan"), d.sample_cyan, Color32::from_rgb(0, 174, 239)),
@@ -436,17 +429,15 @@ fn show_color_warnings_panel(ui: &mut egui::Ui, d: &mut OutputPreviewDraft, t: &
                     ui.label(egui::RichText::new(format!("{total:.0}%")).font(theme::semibold(12.0)));
                 });
             });
-        });
+        },
+    );
 }
 
 fn show_object_inspector_panel(ui: &mut egui::Ui, d: &mut OutputPreviewDraft, t: &Tokens) {
     ui.label(egui::RichText::new(tl!("Object Inspector")).font(theme::semibold(13.0)));
-    egui::Frame::NONE
-        .fill(t.field)
-        .stroke(Stroke::new(1.0, t.border))
-        .corner_radius(CornerRadius::same(4))
-        .inner_margin(egui::Margin::same(8))
-        .show(ui, |ui| {
+    egui::Frame::NONE.fill(t.field).stroke(Stroke::new(1.0, t.border)).corner_radius(CornerRadius::same(4)).inner_margin(egui::Margin::same(8)).show(
+        ui,
+        |ui| {
             ui.set_width(ui.available_width());
             if let Some(obj) = &d.inspected_object {
                 ui.label(egui::RichText::new(format!("▼ {} (Page {})", obj.kind, obj.page + 1)).font(theme::semibold(13.0)));
@@ -510,7 +501,8 @@ fn show_object_inspector_panel(ui: &mut egui::Ui, d: &mut OutputPreviewDraft, t:
                         .font(theme::regular(12.0)),
                 );
             }
-        });
+        },
+    );
 }
 
 /// Paint page boxes overlay (ArtBox, TrimBox, BleedBox, CropBox) for Output Preview.
@@ -690,11 +682,7 @@ impl PdfCraftApp {
                     let area = w * h;
                     if area < min_area {
                         min_area = area;
-                        let ppi = if img.width > 0 && w > 0.0 {
-                            Some(((img.width as f64 * 72.0 / w).round() as u32).max(1))
-                        } else {
-                            None
-                        };
+                        let ppi = if img.width > 0 && w > 0.0 { Some(((img.width as f64 * 72.0 / w).round() as u32).max(1)) } else { None };
                         best_match = Some(InspectedObject {
                             page,
                             kind: if img.is_form { "Vector Artwork / Form".into() } else { "Image".into() },
@@ -918,10 +906,7 @@ mod tests {
 
     #[test]
     fn object_inspector_state() {
-        let mut d = OutputPreviewDraft {
-            preview_mode: "Object Inspector".into(),
-            ..Default::default()
-        };
+        let mut d = OutputPreviewDraft { preview_mode: "Object Inspector".into(), ..Default::default() };
         assert!(d.inspected_object.is_none());
 
         d.inspected_object = Some(InspectedObject {

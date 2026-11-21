@@ -3822,15 +3822,8 @@ fn apply_frame_requests(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui, 
                     let r = img.visible_rect.unwrap_or(img.rect);
                     let center = [(r[0] + r[2]) / 2.0, (r[1] + r[3]) / 2.0];
                     app.views[index].comments.context_at = Some((page, center));
-                    app.views[index].comments.composer = Some(crate::comments::Composer {
-                        page,
-                        at: center,
-                        kind: crate::comments::ComposerKind::Note,
-                        text: String::new(),
-                        focus: true,
-                        bold: false,
-                        italic: false,
-                    });
+                    app.views[index].comments.composer =
+                        Some(crate::comments::Composer::new(page, center, crate::comments::ComposerKind::Note, String::new(), true, false, false));
                 }
             }
         }
@@ -3874,15 +3867,8 @@ fn apply_frame_requests(app: &mut PdfCraftApp, index: usize, ui: &mut egui::Ui, 
             app.quick_tool = QuickTool::MarqueeZoom;
         }
         Some(PageMenuAction::AddComment(page, at)) => {
-            app.views[index].comments.composer = Some(crate::comments::Composer {
-                page,
-                at,
-                kind: crate::comments::ComposerKind::Note,
-                text: String::new(),
-                focus: true,
-                bold: false,
-                italic: false,
-            });
+            app.views[index].comments.composer =
+                Some(crate::comments::Composer::new(page, at, crate::comments::ComposerKind::Note, String::new(), true, false, false));
         }
         Some(PageMenuAction::FlattenComments) => {
             app.views[index].comments.select(None);

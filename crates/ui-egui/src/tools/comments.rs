@@ -50,7 +50,7 @@ pub(crate) use popups::popups;
 #[cfg(test)]
 use state::after_delete;
 use state::login_name;
-pub use state::{CommentView, Composer, ComposerKind, Gesture, SortBy};
+pub use state::{CharStyle, CommentView, Composer, ComposerKind, Gesture, SortBy};
 pub(crate) use state::{EditorFocus, PageCx};
 
 /// Acrobat's selection blue for annotation frames and handles (11-visual-spec §5).

@@ -520,7 +520,7 @@ pub(super) fn selection_actions(
             } else {
                 comments::ComposerKind::TextNote { quads, markup: pdfcraft_engine::Markup::Highlight }
             };
-            view.comments.composer = Some(comments::Composer { page, at, kind, text: String::new(), focus: true, bold: false, italic: false });
+            view.comments.composer = Some(comments::Composer::new(page, at, kind, String::new(), true, false, false));
         }
         SelectionAction::Markup(tool) => {
             // Every markup button carries a markup tool; anything else adds nothing.
@@ -532,15 +532,15 @@ pub(super) fn selection_actions(
                 let last = quads.last().copied().unwrap_or_default();
                 let at = [last[2].max(last[6]), last[1].max(last[3])];
                 view.clear_selection();
-                view.comments.composer = Some(comments::Composer {
+                view.comments.composer = Some(comments::Composer::new(
                     page,
                     at,
-                    kind: comments::ComposerKind::TextNote { quads, markup: kind },
-                    text: String::new(),
-                    focus: true,
-                    bold: false,
-                    italic: false,
-                });
+                    comments::ComposerKind::TextNote { quads, markup: kind },
+                    String::new(),
+                    true,
+                    false,
+                    false,
+                ));
             } else {
                 // Multi-page markup remains a single batch; the composer is page-anchored.
                 view.clear_selection();
