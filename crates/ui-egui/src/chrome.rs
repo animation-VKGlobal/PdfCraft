@@ -397,6 +397,11 @@ fn tab_menu(app: &PdfCraftApp, ui: &mut egui::Ui, index: usize, action: &mut Opt
         *action = Some(Action::Split { tab, down: true });
         ui.close();
     }
+    let can_new_window = cfg!(not(target_arch = "wasm32")) && app.session.get(id).is_some_and(|d| d.path.is_some());
+    if ui.add_enabled(can_new_window, egui::Button::new(tl!("Move to new window"))).clicked() {
+        *action = Some(Action::NewWindow(tab));
+        ui.close();
+    }
     ui.separator();
     let reveal = cfg!(not(target_arch = "wasm32")) && app.session.get(id).is_some_and(|d| d.path.is_some());
     let label = if cfg!(target_os = "macos") { tl!("Reveal in Finder") } else { tl!("Reveal in File Explorer") };

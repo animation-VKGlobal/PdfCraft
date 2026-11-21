@@ -235,6 +235,20 @@ fn text_box(ui: &mut egui::Ui, parts: &mut Parts<'_>, a: &Annotation, name: &str
                     .id_salt(id_salt),
             )
             .accessible_name(name);
+        let sel_key = field_id.with("saved_selection");
+        if let Some(sel) = super::composer::get_text_selection(ui.ctx(), field_id) {
+            ui.data_mut(|d| d.insert_temp(sel_key, sel));
+        } else if field.clicked_by(egui::PointerButton::Primary) {
+            ui.data_mut(|d| d.remove::<(usize, usize)>(sel_key));
+        }
+        if field.secondary_clicked()
+            && let Some((start, end)) = ui.data(|d| d.get_temp::<(usize, usize)>(sel_key))
+        {
+            let count = text.chars().count();
+            if start < count && end <= count && start < end {
+                super::composer::reselect_range(ui.ctx(), field_id, start, end);
+            }
+        }
         let mut undo = parts.cv.popup_undo.get(&key).cloned();
         super::composer::format_editor_keys(ui, &field, &mut text, &mut styles, &mut undo, &mut bold, &mut italic);
         let mut undo_copy = undo.clone();
@@ -317,6 +331,20 @@ fn footer(ui: &mut egui::Ui, parts: &mut Parts<'_>, a: &Annotation) {
             .margin(egui::Margin::symmetric(4, 2))
             .id_salt(id_salt),
     );
+    let sel_key = field_id.with("saved_selection");
+    if let Some(sel) = super::composer::get_text_selection(ui.ctx(), field_id) {
+        ui.data_mut(|d| d.insert_temp(sel_key, sel));
+    } else if field.clicked_by(egui::PointerButton::Primary) {
+        ui.data_mut(|d| d.remove::<(usize, usize)>(sel_key));
+    }
+    if field.secondary_clicked()
+        && let Some((start, end)) = ui.data(|d| d.get_temp::<(usize, usize)>(sel_key))
+    {
+        let count = reply.chars().count();
+        if start < count && end <= count && start < end {
+            super::composer::reselect_range(ui.ctx(), field_id, start, end);
+        }
+    }
     let mut undo = parts.cv.popup_undo.get(&reply_key).cloned();
     super::composer::format_editor_keys(ui, &field, &mut reply, &mut styles, &mut undo, &mut bold, &mut italic);
     let mut undo_copy = undo.clone();

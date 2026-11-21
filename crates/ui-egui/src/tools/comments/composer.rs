@@ -111,6 +111,20 @@ pub(crate) fn composer(ctx: &egui::Context, keys: PageKeys, view: &mut DocView, 
                 )
                 // 0.37 kittest rejects an unnamed text input; the hint is its logical name.
                 .accessible_name(hint);
+            let sel_key = text_id.with("saved_selection");
+            if let Some(sel) = get_text_selection(ui.ctx(), text_id) {
+                ui.data_mut(|d| d.insert_temp(sel_key, sel));
+            } else if edit.clicked_by(egui::PointerButton::Primary) {
+                ui.data_mut(|d| d.remove::<(usize, usize)>(sel_key));
+            }
+            if edit.secondary_clicked()
+                && let Some((start, end)) = ui.data(|d| d.get_temp::<(usize, usize)>(sel_key))
+            {
+                let count = c.text.chars().count();
+                if start < count && end <= count && start < end {
+                    reselect_range(ui.ctx(), text_id, start, end);
+                }
+            }
             if c.focus {
                 edit.request_focus();
                 c.focus = false;
@@ -407,7 +421,17 @@ pub(crate) fn show_comment_text_context_menu(
     default_italic: &mut bool,
 ) {
     ui.set_min_width(170.0);
-    let selection = get_text_selection(ui.ctx(), field_id);
+    let sel_key = field_id.with("saved_selection");
+    let mut selection = get_text_selection(ui.ctx(), field_id);
+    if selection.is_none()
+        && let Some((start, end)) = ui.data(|d| d.get_temp::<(usize, usize)>(sel_key))
+    {
+        let char_count = text.chars().count();
+        if start < char_count && end <= char_count && start < end {
+            reselect_range(ui.ctx(), field_id, start, end);
+            selection = Some((start, end));
+        }
+    }
     let has_selection = selection.is_some();
     let can_undo = undo.is_some();
 
@@ -416,6 +440,7 @@ pub(crate) fn show_comment_text_context_menu(
             *text = prev_text;
             *styles = prev_styles;
         }
+        ui.data_mut(|d| d.remove::<(usize, usize)>(sel_key));
         ui.close();
     }
     ui.separator();
@@ -435,6 +460,7 @@ pub(crate) fn show_comment_text_context_menu(
                     styles.drain(start..end);
                 }
                 reposition_cursor(ui.ctx(), field_id, start);
+                ui.data_mut(|d| d.remove::<(usize, usize)>(sel_key));
             }
         }
         ui.close();
@@ -446,6 +472,7 @@ pub(crate) fn show_comment_text_context_menu(
             if start < chars.len() && end <= chars.len() && start < end {
                 let copy_text: String = chars[start..end].iter().collect();
                 ui.ctx().copy_text(copy_text);
+                reselect_range(ui.ctx(), field_id, start, end);
             }
         }
         ui.close();
@@ -480,6 +507,7 @@ pub(crate) fn show_comment_text_context_menu(
                 styles.splice(start..start, insert_styles);
             }
             reposition_cursor(ui.ctx(), field_id, start + pasted_chars.len());
+            ui.data_mut(|d| d.remove::<(usize, usize)>(sel_key));
         }
         ui.close();
     }
@@ -497,6 +525,7 @@ pub(crate) fn show_comment_text_context_menu(
                     styles.drain(start..end);
                 }
                 reposition_cursor(ui.ctx(), field_id, start);
+                ui.data_mut(|d| d.remove::<(usize, usize)>(sel_key));
             }
         }
         ui.close();
@@ -511,16 +540,25 @@ pub(crate) fn show_comment_text_context_menu(
         if ui.button(tl!("Bold\tCtrl+B")).clicked() {
             *undo = Some((text.clone(), styles.clone()));
             toggle_bold_range(styles, selection, default_bold);
+            if let Some((start, end)) = selection {
+                reselect_range(ui.ctx(), field_id, start, end);
+            }
             ui.close();
         }
         if ui.button(tl!("Italic\tCtrl+I")).clicked() {
             *undo = Some((text.clone(), styles.clone()));
             toggle_italic_range(styles, selection, default_italic);
+            if let Some((start, end)) = selection {
+                reselect_range(ui.ctx(), field_id, start, end);
+            }
             ui.close();
         }
         if ui.button(tl!("Underline\tCtrl+U")).clicked() {
             *undo = Some((text.clone(), styles.clone()));
             toggle_underline_range(styles, selection);
+            if let Some((start, end)) = selection {
+                reselect_range(ui.ctx(), field_id, start, end);
+            }
             ui.close();
         }
         if ui.button(tl!("Superscript\tShift+Ctrl+Plus")).clicked() {
@@ -553,6 +591,9 @@ pub(crate) fn show_comment_text_context_menu(
         if ui.button(tl!("Clear Formatting")).clicked() {
             *undo = Some((text.clone(), styles.clone()));
             clear_formatting_range(styles, selection, default_bold, default_italic);
+            if let Some((start, end)) = selection {
+                reselect_range(ui.ctx(), field_id, start, end);
+            }
             ui.close();
         }
     });
@@ -562,6 +603,9 @@ pub(crate) fn show_comment_text_context_menu(
             *undo = Some((text.clone(), styles.clone()));
             let color = Color32::from_rgb((rgb[0] * 255.0) as u8, (rgb[1] * 255.0) as u8, (rgb[2] * 255.0) as u8);
             apply_color_range(styles, selection, Some(color));
+            if let Some((start, end)) = selection {
+                reselect_range(ui.ctx(), field_id, start, end);
+            }
             ui.close();
         }
     });

@@ -12,6 +12,8 @@ pub(crate) enum Action {
         tab: u64,
         down: bool,
     },
+    /// Move a tab out to an independent window of its own.
+    NewWindow(u64),
 }
 
 impl crate::PdfCraftApp {
@@ -58,6 +60,23 @@ impl crate::PdfCraftApp {
             Action::Split { tab, down } => {
                 if let Some(i) = self.tab_with_key(tab) {
                     self.split_tab(i, down);
+                }
+            }
+            Action::NewWindow(tab) => {
+                if let Some(i) = self.tab_with_key(tab) {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    if let Some(v) = self.views.get(i)
+                        && let Some(path) = self.session.get(v.id).and_then(|d| d.path.clone())
+                        && let Ok(exe) = std::env::current_exe()
+                    {
+                        let mut cmd = std::process::Command::new(exe);
+                        cmd.arg("--new-window").arg(&path);
+                        if cmd.spawn().is_ok() && self.views.len() > 1 {
+                            self.request_close_tab(i);
+                        }
+                    }
+                    #[cfg(target_arch = "wasm32")]
+                    let _ = tab;
                 }
             }
             Action::Reopen => {
