@@ -1688,11 +1688,10 @@ fn dialog_about(ui: &mut egui::Ui, app: &mut PdfCraftApp, req: &mut Pending) -> 
             ui.horizontal(|ui| {
                 ui.label(egui::RichText::new(tl!("Automatic updates:")).font(theme::medium(13.0)));
                 widgets::toggle_switch(ui, &mut app.update_check_at_start, tl!("Automatic updates"), &t);
-                ui.label(egui::RichText::new(if app.update_check_at_start { tl!("On") } else { tl!("Off") }).color(if app.update_check_at_start {
-                    t.accent
-                } else {
-                    t.text_muted
-                }));
+                ui.label(
+                    egui::RichText::new(if app.update_check_at_start { tl!("On") } else { tl!("Off") })
+                        .color(if app.update_check_at_start { t.accent } else { t.text_muted }),
+                );
             });
             ui.add_space(6.0);
             ui.label(tl!("A clean-room, open-source PDF application written in Rust. MIT OR Apache-2.0."));
