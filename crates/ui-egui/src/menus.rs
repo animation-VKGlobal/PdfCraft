@@ -227,8 +227,19 @@ const SIGN: &[&str] = &[
     "sign.panel",
 ];
 const WINDOW: &[&str] = &["view.next_tab", "view.previous_tab"];
-const HELP: &[&str] =
-    &["help.shortcuts", SEP, "help.app_page", "help.github", "help.website", "help.discord", SEP, "help.check_updates", SEP, "help.about"];
+const HELP: &[&str] = &[
+    "help.shortcuts",
+    SEP,
+    "help.app_page",
+    "help.github",
+    "help.website",
+    "help.discord",
+    SEP,
+    "help.check_updates",
+    "help.auto_updates",
+    SEP,
+    "help.about",
+];
 
 /// A registry shortcut as a craft-keymap chord: `command` is ⌘ (Ctrl elsewhere) and `mac_ctrl`
 /// the Control key on macOS. `None` for a key craft-keymap doesn't name.
@@ -516,6 +527,7 @@ impl PdfCraftApp {
                 id => enabled_id(id),
             };
         let checked = match command.id.as_str() {
+            "help.auto_updates" => Some(self.update_check_at_start),
             "view.layout.single" => Some(view.is_some_and(|v| v.layout == PageLayout::Single)),
             "view.layout.two_up" => Some(view.is_some_and(|v| v.layout == PageLayout::TwoUp)),
             "view.continuous" => Some(view.is_some_and(|v| v.continuous())),

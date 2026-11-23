@@ -442,6 +442,7 @@ pub const COMMANDS: &[CommandSpec] = &[
     c("help.github", "PdfCraft on GitHub", HELP, None, Nothing, "code-xml"),
     c("help.website", "ArtCraft website", HELP, None, Nothing, "external-link"),
     c("help.check_updates", "Check for updates…", HELP, None, Nothing, "cloud"),
+    c("help.auto_updates", "Automatic updates", HELP, None, Nothing, "refresh-cw"),
     c("help.about", "About PdfCraft", HELP, None, Nothing, "info"),
 ];
 

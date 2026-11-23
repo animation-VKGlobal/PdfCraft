@@ -152,7 +152,7 @@ impl PdfCraftApp {
             last_session: Default::default(),
             quit_session: None,
             reload_changed_files: true,
-            update_check_at_start: true,
+            update_check_at_start: false,
             show_secured_notice: true,
             text_links: true,
             always_default_view: false,

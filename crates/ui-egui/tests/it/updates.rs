@@ -157,17 +157,16 @@ fn run_until_asked(h: &mut Harness<'static, PdfCraftApp>, calls: &std::sync::ato
 #[test]
 fn the_preference_keeps_the_check_at_start_from_reaching_the_network() {
     use std::sync::atomic::Ordering::SeqCst;
-    assert!(PdfCraftApp::new().update_check_at_start, "on by default");
+    assert!(!PdfCraftApp::new().update_check_at_start, "off by default");
 
-    // The same start with the preference left on does ask, so a count of none below means
-    // the preference held the check back and not that it hadn't run yet.
-    let (mut h, calls) = started_with("{}");
+    // The same start with the preference turned on does ask.
+    let (mut h, calls) = started_with(r#"{"update_check_at_start": true}"#);
     run_until_asked(&mut h, &calls, std::time::Duration::from_secs(30));
     assert_eq!(calls.load(SeqCst), 1, "on, the app asks at start");
 
-    let (mut h, calls) = started_with(r#"{"update_check_at_start": false}"#);
+    let (mut h, calls) = started_with("{}");
     run_until_asked(&mut h, &calls, std::time::Duration::from_millis(500));
-    assert_eq!(calls.load(SeqCst), 0, "nothing is asked at start");
+    assert_eq!(calls.load(SeqCst), 0, "nothing is asked at start by default");
 
     let mut restarted = PdfCraftApp::new();
     restarted.restore(&h.state().persist());
@@ -211,7 +210,7 @@ fn preferences_turn_the_check_at_start_off() {
 fn settings_from_the_old_opt_in_leave_the_check_at_start_on() {
     let mut app = PdfCraftApp::new();
     app.restore(r#"{"check_updates_at_start": false}"#);
-    assert!(app.update_check_at_start, "a key of the removed option decides nothing");
+    assert!(!app.update_check_at_start, "a key of the removed option decides nothing");
 }
 
 #[test]
@@ -220,6 +219,7 @@ fn the_check_at_start_offers_the_prompt_and_later_dismisses_it() {
         let mut app = PdfCraftApp::new();
         app.set_option("language", "en").unwrap();
         app.set_update_source(source(Ok(Some("v99.0.0"))));
+        app.update_check_at_start = true;
         app.set_startup_update_check(true);
         app
     });
@@ -237,4 +237,14 @@ fn later_on_the_startup_prompt(h: &mut Harness<'static, PdfCraftApp>) {
     }
     h.get_by_label("LATER").click();
     h.run_steps(3);
+}
+
+#[test]
+fn help_auto_updates_toggles_setting() {
+    let mut app = PdfCraftApp::new();
+    assert!(!app.update_check_at_start);
+    app.execute("help.auto_updates");
+    assert!(app.update_check_at_start);
+    app.execute("help.auto_updates");
+    assert!(!app.update_check_at_start);
 }

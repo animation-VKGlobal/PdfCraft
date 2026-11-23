@@ -529,7 +529,7 @@ fn dialog_body(ui: &mut egui::Ui, app: &mut PdfCraftApp, dialog: Dialog, req: &m
             }
         }
         Dialog::About => {
-            if !dialog_about(ui, req) {
+            if !dialog_about(ui, app, req) {
                 return false;
             }
         }
@@ -1658,7 +1658,7 @@ fn dialog_shortcuts(ui: &mut egui::Ui) -> bool {
 }
 
 /// `Dialog::About` content. Returns `false` when it has its own buttons and no footer is wanted.
-fn dialog_about(ui: &mut egui::Ui, req: &mut Pending) -> bool {
+fn dialog_about(ui: &mut egui::Ui, app: &mut PdfCraftApp, req: &mut Pending) -> bool {
     let t = Tokens::get(ui.ctx());
     // Tabs About · Contributors · Models.
     let tab_id = egui::Id::unique("about_tab");
@@ -1683,6 +1683,16 @@ fn dialog_about(ui: &mut egui::Ui, req: &mut Pending) -> bool {
                     ui.label(egui::RichText::new("PdfCraft").font(theme::semibold(20.0)));
                     ui.label(crate::i18n::fmt(tl!("Version {v}"), &[("v", &pdfcraft_engine::build_info::version())]));
                 });
+            });
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                ui.label(egui::RichText::new(tl!("Automatic updates:")).font(theme::medium(13.0)));
+                widgets::toggle_switch(ui, &mut app.update_check_at_start, tl!("Automatic updates"), &t);
+                ui.label(egui::RichText::new(if app.update_check_at_start { tl!("On") } else { tl!("Off") }).color(if app.update_check_at_start {
+                    t.accent
+                } else {
+                    t.text_muted
+                }));
             });
             ui.add_space(6.0);
             ui.label(tl!("A clean-room, open-source PDF application written in Rust. MIT OR Apache-2.0."));
